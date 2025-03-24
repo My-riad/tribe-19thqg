@@ -1,0 +1,184 @@
+---
+# Deployment for the Planning Service
+# Handles event scheduling, availability collection, venue recommendations,
+# and AI-optimized planning for meetups
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: planning-service
+  namespace: api-services
+  labels:
+    app: planning-service
+    part-of: tribe
+    tier: backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: planning-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: planning-service
+        part-of: tribe
+        tier: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3004"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: planning-service
+        image: ${ECR_REPOSITORY_URI}/tribe/planning-service:${IMAGE_TAG}
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3004
+          name: http
+        env:
+        - name: NODE_ENV
+          value: "${ENVIRONMENT}"
+        - name: PORT
+          value: "3004"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: planning-service-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: redis-credentials
+              key: url
+        - name: AI_ORCHESTRATION_SERVICE_URL
+          value: "http://ai-orchestration-service.ai-services.svc.cluster.local"
+        envFrom:
+        - configMapRef:
+            name: planning-service-config
+        - secretRef:
+            name: planning-service-secrets
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 1
+            memory: 1Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 2
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          capabilities:
+            drop:
+            - ALL
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - planning-service
+              topologyKey: kubernetes.io/hostname
+      terminationGracePeriodSeconds: 60
+
+---
+# Service to expose the Planning Service within the cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: planning-service
+  namespace: api-services
+  labels:
+    app: planning-service
+    part-of: tribe
+    tier: backend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: http
+    protocol: TCP
+    name: http
+  selector:
+    app: planning-service
+
+---
+# HorizontalPodAutoscaler for automatic scaling based on CPU utilization
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: planning-service
+  namespace: api-services
+  labels:
+    app: planning-service
+    part-of: tribe
+    tier: backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: planning-service
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+
+---
+# PodDisruptionBudget to ensure high availability during voluntary disruptions
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: planning-service-pdb
+  namespace: api-services
+  labels:
+    app: planning-service
+    part-of: tribe
+    tier: backend
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: planning-service
