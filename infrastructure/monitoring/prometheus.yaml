@@ -1,0 +1,717 @@
+---
+# ServiceAccount for Prometheus to access Kubernetes resources
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app: prometheus
+    part-of: tribe
+    tier: observability
+
+---
+# ClusterRole for Prometheus to access Kubernetes API resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+    part-of: tribe
+    tier: observability
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/proxy", "services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["extensions"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+
+---
+# ClusterRoleBinding for Prometheus
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+    part-of: tribe
+    tier: observability
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
+
+---
+# ConfigMap containing Prometheus configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+  labels:
+    app: prometheus
+    part-of: tribe
+    tier: observability
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      scrape_timeout: 10s
+
+    alerting:
+      alertmanagers:
+      - static_configs:
+        - targets:
+          - alertmanager:9093
+
+    rule_files:
+      - /etc/prometheus/rules/*.yml
+
+    scrape_configs:
+      - job_name: 'prometheus'
+        static_configs:
+        - targets: ['localhost:9090']
+
+      - job_name: 'kubernetes-apiservers'
+        kubernetes_sd_configs:
+        - role: endpoints
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+          action: keep
+          regex: default;kubernetes;https
+
+      - job_name: 'kubernetes-nodes'
+        kubernetes_sd_configs:
+        - role: node
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+        - action: labelmap
+          regex: __meta_kubernetes_node_label_(.+)
+
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+        - role: pod
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+          action: keep
+          regex: true
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          regex: ([^:]+)(?:\d+)?;(\d+)
+          replacement: $1:$2
+          target_label: __address__
+        - action: labelmap
+          regex: __meta_kubernetes_pod_label_(.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: kubernetes_namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: kubernetes_pod_name
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          action: replace
+          target_label: app
+        - source_labels: [__meta_kubernetes_pod_label_part_of]
+          action: replace
+          target_label: part_of
+        - source_labels: [__meta_kubernetes_pod_label_tier]
+          action: replace
+          target_label: tier
+
+      - job_name: 'kubernetes-service-endpoints'
+        kubernetes_sd_configs:
+        - role: endpoints
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+          action: keep
+          regex: true
+        - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scheme]
+          action: replace
+          target_label: __scheme__
+          regex: (https?)
+        - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+          action: replace
+          target_label: __address__
+          regex: ([^:]+)(?:\d+)?;(\d+)
+          replacement: $1:$2
+        - action: labelmap
+          regex: __meta_kubernetes_service_label_(.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: kubernetes_namespace
+        - source_labels: [__meta_kubernetes_service_name]
+          action: replace
+          target_label: kubernetes_service_name
+        - source_labels: [__meta_kubernetes_service_label_app]
+          action: replace
+          target_label: app
+        - source_labels: [__meta_kubernetes_service_label_part_of]
+          action: replace
+          target_label: part_of
+        - source_labels: [__meta_kubernetes_service_label_tier]
+          action: replace
+          target_label: tier
+
+      - job_name: 'kube-state-metrics'
+        static_configs:
+        - targets: ['kube-state-metrics:8080']
+
+      - job_name: 'node-exporter'
+        kubernetes_sd_configs:
+        - role: endpoints
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_endpoints_name]
+          action: keep
+          regex: node-exporter
+        - action: labelmap
+          regex: __meta_kubernetes_service_label_(.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: kubernetes_namespace
+        - source_labels: [__meta_kubernetes_service_name]
+          action: replace
+          target_label: kubernetes_service_name
+
+      - job_name: 'api-gateway'
+        kubernetes_sd_configs:
+        - role: pod
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          action: keep
+          regex: api-gateway
+        - action: labelmap
+          regex: __meta_kubernetes_pod_label_(.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: kubernetes_namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: kubernetes_pod_name
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          action: replace
+          target_label: app
+        - source_labels: [__meta_kubernetes_pod_label_part_of]
+          action: replace
+          target_label: part_of
+        - source_labels: [__meta_kubernetes_pod_label_tier]
+          action: replace
+          target_label: tier
+
+      - job_name: 'tribe-services'
+        kubernetes_sd_configs:
+        - role: pod
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_part_of]
+          action: keep
+          regex: tribe
+        - action: labelmap
+          regex: __meta_kubernetes_pod_label_(.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: kubernetes_namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: kubernetes_pod_name
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          action: replace
+          target_label: app
+        - source_labels: [__meta_kubernetes_pod_label_tier]
+          action: replace
+          target_label: tier
+
+---
+# ConfigMap containing Prometheus alerting rules
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: monitoring
+  labels:
+    app: prometheus
+    part-of: tribe
+    tier: observability
+data:
+  alerts.yml: |
+    groups:
+    - name: node
+      rules:
+      - alert: HighNodeCPU
+        expr: instance:node_cpu_utilisation:rate5m > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: node
+        annotations:
+          summary: High CPU usage on node
+          description: Node {{ $labels.instance }} has high CPU usage ({{ $value | humanizePercentage }})
+
+      - alert: HighNodeMemory
+        expr: instance:node_memory_utilisation:ratio > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          service: node
+        annotations:
+          summary: High memory usage on node
+          description: Node {{ $labels.instance }} has high memory usage ({{ $value | humanizePercentage }})
+
+      - alert: HighNodeDiskUsage
+        expr: node_filesystem_avail_bytes / node_filesystem_size_bytes < 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: node
+        annotations:
+          summary: High disk usage on node
+          description: Node {{ $labels.instance }} has high disk usage on {{ $labels.device }} ({{ $value | humanizePercentage }} available)
+
+    - name: kubernetes
+      rules:
+      - alert: KubePodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total[5m]) > 0.2
+        for: 15m
+        labels:
+          severity: warning
+          service: kubernetes
+        annotations:
+          summary: Pod is crash looping
+          description: Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash looping ({{ $value }} restarts in 5m)
+
+      - alert: KubePodNotReady
+        expr: sum by (namespace, pod) (kube_pod_status_phase{phase=~"Pending|Unknown"}) > 0
+        for: 15m
+        labels:
+          severity: warning
+          service: kubernetes
+        annotations:
+          summary: Pod not ready
+          description: Pod {{ $labels.namespace }}/{{ $labels.pod }} has been in a non-ready state for more than 15 minutes
+
+      - alert: KubeDeploymentReplicasMismatch
+        expr: kube_deployment_spec_replicas != kube_deployment_status_replicas_available
+        for: 15m
+        labels:
+          severity: warning
+          service: kubernetes
+        annotations:
+          summary: Deployment replicas mismatch
+          description: Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has not matched the expected number of replicas for more than 15 minutes
+
+    - name: tribe-services
+      rules:
+      - alert: APIHighErrorRate
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) by (app) / sum(rate(http_requests_total[5m])) by (app) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: api-gateway
+        annotations:
+          summary: High API error rate
+          description: Service {{ $labels.app }} has a high error rate ({{ $value | humanizePercentage }})
+
+      - alert: APIHighLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, app)) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: api-gateway
+        annotations:
+          summary: High API latency
+          description: Service {{ $labels.app }} has a high 95th percentile latency of {{ $value }} seconds
+
+      - alert: ServiceDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: monitoring
+        annotations:
+          summary: Service down
+          description: Service {{ $labels.app }} is down
+
+    - name: sla
+      rules:
+      - alert: APIAvailabilitySLOBreach
+        expr: 1 - (sum(rate(http_requests_total{status=~"5.."}[1h])) / sum(rate(http_requests_total[1h]))) < 0.999
+        for: 5m
+        labels:
+          severity: critical
+          service: api-gateway
+          sla: availability
+        annotations:
+          summary: API availability SLO breach
+          description: Service {{ $labels.app }} is not meeting the 99.9% availability SLO
+
+      - alert: APILatencySLOBreach
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[1h])) by (le, app)) > 0.5
+        for: 5m
+        labels:
+          severity: critical
+          service: api-gateway
+          sla: latency
+        annotations:
+          summary: API latency SLO breach
+          description: Service {{ $labels.app }} is not meeting the 500ms P95 latency SLO
+
+    - name: ai-services
+      rules:
+      - alert: AIServiceHighErrorRate
+        expr: sum(rate(ai_requests_total{status="error"}[5m])) by (app) / sum(rate(ai_requests_total[5m])) by (app) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: ai-orchestration-service
+        annotations:
+          summary: AI service high error rate
+          description: AI service {{ $labels.app }} has a high error rate ({{ $value | humanizePercentage }})
+
+      - alert: AIServiceHighLatency
+        expr: histogram_quantile(0.95, sum(rate(ai_request_duration_seconds_bucket[5m])) by (le, app)) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: ai-orchestration-service
+        annotations:
+          summary: AI service high latency
+          description: AI service {{ $labels.app }} has a high 95th percentile latency of {{ $value }} seconds
+
+      - alert: MatchingServiceLowSuccessRate
+        expr: sum(rate(matching_requests_total{status="success"}[5m])) by (app) / sum(rate(matching_requests_total[5m])) by (app) < 0.9
+        for: 5m
+        labels:
+          severity: warning
+          service: matching-service
+        annotations:
+          summary: Matching service low success rate
+          description: Matching service has a low success rate ({{ $value | humanizePercentage }})
+
+---
+# PersistentVolumeClaim for Prometheus data storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-storage
+  namespace: monitoring
+  labels:
+    app: prometheus
+    part-of: tribe
+    tier: observability
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: gp2
+
+---
+# Deployment for Prometheus server
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app: prometheus
+    part-of: tribe
+    tier: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: prometheus
+        part-of: tribe
+        tier: observability
+    spec:
+      serviceAccountName: prometheus
+      securityContext:
+        fsGroup: 65534
+        runAsGroup: 65534
+        runAsNonRoot: true
+        runAsUser: 65534
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.45.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=15d
+            - --web.console.libraries=/usr/share/prometheus/console_libraries
+            - --web.console.templates=/usr/share/prometheus/consoles
+            - --web.enable-lifecycle
+            - --web.external-url=https://monitoring.${DOMAIN_NAME}/prometheus
+          ports:
+            - name: http
+              containerPort: 9090
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 1
+              memory: 2Gi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus/prometheus.yml
+              subPath: prometheus.yml
+            - name: rules
+              mountPath: /etc/prometheus/rules
+            - name: storage
+              mountPath: /prometheus
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: rules
+          configMap:
+            name: prometheus-rules
+        - name: storage
+          persistentVolumeClaim:
+            claimName: prometheus-storage
+
+---
+# Service to expose Prometheus within the cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app: prometheus
+    part-of: tribe
+    tier: observability
+spec:
+  selector:
+    app: prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+
+---
+# Deployment for kube-state-metrics
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-state-metrics
+  namespace: monitoring
+  labels:
+    app: kube-state-metrics
+    part-of: tribe
+    tier: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-state-metrics
+  template:
+    metadata:
+      labels:
+        app: kube-state-metrics
+        part-of: tribe
+        tier: observability
+    spec:
+      serviceAccountName: prometheus
+      containers:
+        - name: kube-state-metrics
+          image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.9.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: telemetry
+              containerPort: 8081
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+
+---
+# Service to expose kube-state-metrics within the cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-state-metrics
+  namespace: monitoring
+  labels:
+    app: kube-state-metrics
+    part-of: tribe
+    tier: observability
+spec:
+  selector:
+    app: kube-state-metrics
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    - name: telemetry
+      port: 8081
+      targetPort: 8081
+      protocol: TCP
+
+---
+# DaemonSet for node-exporter
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: monitoring
+  labels:
+    app: node-exporter
+    part-of: tribe
+    tier: observability
+spec:
+  selector:
+    matchLabels:
+      app: node-exporter
+  template:
+    metadata:
+      labels:
+        app: node-exporter
+        part-of: tribe
+        tier: observability
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+    spec:
+      hostNetwork: true
+      hostPID: true
+      serviceAccountName: prometheus
+      securityContext:
+        fsGroup: 65534
+        runAsGroup: 65534
+        runAsNonRoot: true
+        runAsUser: 65534
+      containers:
+        - name: node-exporter
+          image: prom/node-exporter:v1.6.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --path.procfs=/host/proc
+            - --path.sysfs=/host/sys
+            - --path.rootfs=/host/root
+            - --collector.filesystem.ignored-mount-points=^/(dev|proc|sys|var/lib/docker/.+)($|/)
+            - --collector.filesystem.ignored-fs-types=^(autofs|binfmt_misc|cgroup|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|sysfs|tracefs)$
+          ports:
+            - name: http
+              containerPort: 9100
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          volumeMounts:
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: sys
+              mountPath: /host/sys
+              readOnly: true
+            - name: root
+              mountPath: /host/root
+              readOnly: true
+              mountPropagation: HostToContainer
+      tolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/master
+      volumes:
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: sys
+          hostPath:
+            path: /sys
+        - name: root
+          hostPath:
+            path: /
+
+---
+# Service to expose node-exporter within the cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-exporter
+  namespace: monitoring
+  labels:
+    app: node-exporter
+    part-of: tribe
+    tier: observability
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9100"
+spec:
+  selector:
+    app: node-exporter
+  ports:
+    - name: http
+      port: 9100
+      targetPort: 9100
+      protocol: TCP
