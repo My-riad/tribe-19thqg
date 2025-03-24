@@ -1,5 +1,5 @@
 # Stage 1: Build shared library
-FROM node:18-alpine AS shared-builder
+FROM node:23-alpine AS shared-builder
 WORKDIR /app
 # Copy and install shared dependencies first
 COPY ./src/shared/package*.json ./
@@ -10,7 +10,7 @@ COPY ./src/shared/src ./src
 RUN npm run build
 
 # Stage 2: Build service
-FROM node:18-alpine AS service-builder
+FROM node:23-alpine AS service-builder
 ARG SERVICE_DIR
 WORKDIR /app
 # Copy and install service dependencies
@@ -27,7 +27,7 @@ RUN npm run build
 RUN npm prune --production
 
 # Stage 3: Production runtime
-FROM node:18-alpine AS production
+FROM node:23-alpine AS production
 ARG SERVICE_DIR
 ARG SERVICE_PORT
 WORKDIR /app
