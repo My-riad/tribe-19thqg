@@ -1,0 +1,358 @@
+# HashiCorp Vault Configuration for Tribe Platform
+# This configuration sets up Vault for secure secrets management,
+# including authentication methods, secret engines, and access policies.
+
+# Server configuration for Vault
+server:
+  # High-availability storage backend using Raft
+  storage:
+    type: raft
+    path: /vault/data
+    node_id: ${NODE_ID}
+    retry_join:
+      - leader_api_addr: https://vault-0.vault-internal:8200
+        leader_ca_cert_file: /vault/tls/ca.crt
+        leader_client_cert_file: /vault/tls/tls.crt
+        leader_client_key_file: /vault/tls/tls.key
+      - leader_api_addr: https://vault-1.vault-internal:8200
+        leader_ca_cert_file: /vault/tls/ca.crt
+        leader_client_cert_file: /vault/tls/tls.crt
+        leader_client_key_file: /vault/tls/tls.key
+      - leader_api_addr: https://vault-2.vault-internal:8200
+        leader_ca_cert_file: /vault/tls/ca.crt
+        leader_client_cert_file: /vault/tls/tls.crt
+        leader_client_key_file: /vault/tls/tls.key
+
+  # API listener configuration with TLS
+  listener:
+    tcp:
+      address: 0.0.0.0:8200
+      tls_cert_file: /vault/tls/tls.crt
+      tls_key_file: /vault/tls/tls.key
+      tls_client_ca_file: /vault/tls/ca.crt
+
+  # API address for client redirection
+  api_addr: https://vault.${DOMAIN_NAME}
+  # Cluster address for HA communication
+  cluster_addr: https://${POD_IP}:8201
+  # Enable the web UI
+  ui: true
+  # Log level
+  log_level: info
+  
+  # Telemetry configuration for monitoring
+  telemetry:
+    prometheus_retention_time: 30s
+    disable_hostname: true
+  
+  # AWS KMS auto-unseal configuration
+  seal:
+    awskms:
+      region: ${AWS_REGION}
+      kms_key_id: ${KMS_KEY_ID}
+
+# Authentication methods configuration
+auth_methods:
+  # Kubernetes authentication for services running in Kubernetes
+  - type: kubernetes
+    path: kubernetes
+    description: Kubernetes authentication method
+    config:
+      kubernetes_host: https://kubernetes.default.svc
+      kubernetes_ca_cert: ${KUBERNETES_CA_CERT}
+      token_reviewer_jwt: ${SERVICE_ACCOUNT_TOKEN}
+  
+  # AWS authentication for AWS services
+  - type: aws
+    path: aws
+    description: AWS authentication method
+    config:
+      access_key: ${AWS_ACCESS_KEY}
+      secret_key: ${AWS_SECRET_KEY}
+      region: ${AWS_REGION}
+  
+  # Token authentication for administrative access
+  - type: token
+    path: token
+    description: Token authentication method
+    config:
+      default_lease_ttl: 1h
+      max_lease_ttl: 24h
+
+# Secret engines configuration
+secret_engines:
+  # Key-Value store for static secrets
+  - type: kv
+    path: kv
+    description: Key-Value store for static secrets
+    version: 2
+    config:
+      default_lease_ttl: 168h
+      max_lease_ttl: 720h
+  
+  # Database secrets engine for dynamic credentials
+  - type: database
+    path: database
+    description: Database secrets engine for dynamic credentials
+    config:
+      default_lease_ttl: 1h
+      max_lease_ttl: 24h
+    connections:
+      - name: postgres
+        plugin_name: postgresql-database-plugin
+        connection_url: postgresql://{{username}}:{{password}}@${DB_HOST}:${DB_PORT}/${DB_NAME}
+        username: ${DB_ADMIN_USER}
+        password: ${DB_ADMIN_PASSWORD}
+        allowed_roles:
+          - auth-service
+          - profile-service
+          - tribe-service
+          - event-service
+          - matching-service
+          - engagement-service
+          - planning-service
+          - payment-service
+          - notification-service
+  
+  # Transit secrets engine for encryption as a service
+  - type: transit
+    path: transit
+    description: Transit secrets engine for encryption as a service
+    config:
+      default_lease_ttl: 168h
+      max_lease_ttl: 720h
+    keys:
+      - name: user-data
+        type: aes256-gcm96
+        exportable: false
+        derived: true
+      - name: payment-data
+        type: aes256-gcm96
+        exportable: false
+        derived: true
+      - name: personality-data
+        type: aes256-gcm96
+        exportable: false
+        derived: true
+  
+  # PKI secrets engine for certificate management
+  - type: pki
+    path: pki
+    description: PKI secrets engine for certificate management
+    config:
+      default_lease_ttl: 720h
+      max_lease_ttl: 8760h
+    roles:
+      - name: internal-service
+        allowed_domains:
+          - svc.cluster.local
+          - ${DOMAIN_NAME}
+        allow_subdomains: true
+        max_ttl: 720h
+
+# Policies configuration
+policies:
+  # Authentication service policy
+  - name: auth-service
+    rules:
+      path:
+        kv/data/auth-service/*:
+          capabilities: [read, list]
+        database/creds/auth-service:
+          capabilities: [read]
+        transit/encrypt/user-data:
+          capabilities: [update]
+        transit/decrypt/user-data:
+          capabilities: [update]
+  
+  # Profile service policy
+  - name: profile-service
+    rules:
+      path:
+        kv/data/profile-service/*:
+          capabilities: [read, list]
+        database/creds/profile-service:
+          capabilities: [read]
+        transit/encrypt/user-data:
+          capabilities: [update]
+        transit/decrypt/user-data:
+          capabilities: [update]
+        transit/encrypt/personality-data:
+          capabilities: [update]
+        transit/decrypt/personality-data:
+          capabilities: [update]
+  
+  # Tribe service policy
+  - name: tribe-service
+    rules:
+      path:
+        kv/data/tribe-service/*:
+          capabilities: [read, list]
+        database/creds/tribe-service:
+          capabilities: [read]
+        transit/encrypt/user-data:
+          capabilities: [update]
+        transit/decrypt/user-data:
+          capabilities: [update]
+  
+  # Payment service policy
+  - name: payment-service
+    rules:
+      path:
+        kv/data/payment-service/*:
+          capabilities: [read, list]
+        database/creds/payment-service:
+          capabilities: [read]
+        transit/encrypt/payment-data:
+          capabilities: [update]
+        transit/decrypt/payment-data:
+          capabilities: [update]
+  
+  # AI orchestration service policy
+  - name: ai-orchestration-service
+    rules:
+      path:
+        kv/data/ai-orchestration-service/*:
+          capabilities: [read, list]
+        transit/encrypt/personality-data:
+          capabilities: [update]
+        transit/decrypt/personality-data:
+          capabilities: [update]
+
+# Roles configuration
+roles:
+  # Authentication service role
+  - auth_method: kubernetes
+    name: auth-service
+    bound_service_account_names: [auth-service]
+    bound_service_account_namespaces: [api-services]
+    policies: [auth-service]
+    ttl: 1h
+  
+  # Profile service role
+  - auth_method: kubernetes
+    name: profile-service
+    bound_service_account_names: [profile-service]
+    bound_service_account_namespaces: [api-services]
+    policies: [profile-service]
+    ttl: 1h
+  
+  # Tribe service role
+  - auth_method: kubernetes
+    name: tribe-service
+    bound_service_account_names: [tribe-service]
+    bound_service_account_namespaces: [api-services]
+    policies: [tribe-service]
+    ttl: 1h
+  
+  # Payment service role
+  - auth_method: kubernetes
+    name: payment-service
+    bound_service_account_names: [payment-service]
+    bound_service_account_namespaces: [api-services]
+    policies: [payment-service]
+    ttl: 1h
+  
+  # AI orchestration service role
+  - auth_method: kubernetes
+    name: ai-orchestration-service
+    bound_service_account_names: [ai-orchestration-service]
+    bound_service_account_namespaces: [ai-services]
+    policies: [ai-orchestration-service]
+    ttl: 1h
+
+# Kubernetes integration annotations and templates
+kubernetes_integration:
+  # Service account annotations for Vault Agent injection
+  service_account_annotations:
+    vault.hashicorp.com/agent-inject: "true"
+    vault.hashicorp.com/agent-pre-populate-only: "true"
+    vault.hashicorp.com/agent-init-first: "true"
+    vault.hashicorp.com/role: "${SERVICE_NAME}"
+    vault.hashicorp.com/agent-run-as-user: "1000"
+    vault.hashicorp.com/agent-run-as-group: "1000"
+    vault.hashicorp.com/tls-skip-verify: "false"
+    vault.hashicorp.com/ca-cert: "/vault/tls/ca.crt"
+  
+  # Secret templates for injecting secrets into containers
+  secret_templates:
+    # Database credentials template
+    database_credentials:
+      vault.hashicorp.com/agent-inject-secret-db-creds: "database/creds/${SERVICE_NAME}"
+      vault.hashicorp.com/agent-inject-template-db-creds: |
+        {{- with secret "database/creds/${SERVICE_NAME}" -}}
+        DB_USERNAME={{ .Data.username }}
+        DB_PASSWORD={{ .Data.password }}
+        {{- end -}}
+    
+    # API keys template
+    api_keys:
+      vault.hashicorp.com/agent-inject-secret-api-keys: "kv/data/${SERVICE_NAME}/api-keys"
+      vault.hashicorp.com/agent-inject-template-api-keys: |
+        {{- with secret "kv/data/${SERVICE_NAME}/api-keys" -}}
+        {{- range $key, $value := .Data.data -}}
+        {{ $key }}={{ $value }}
+        {{- end -}}
+        {{- end -}}
+    
+    # Service credentials template
+    service_credentials:
+      vault.hashicorp.com/agent-inject-secret-service-creds: "kv/data/${SERVICE_NAME}/service-credentials"
+      vault.hashicorp.com/agent-inject-template-service-creds: |
+        {{- with secret "kv/data/${SERVICE_NAME}/service-credentials" -}}
+        {{- range $key, $value := .Data.data -}}
+        {{ $key }}={{ $value }}
+        {{- end -}}
+        {{- end -}}
+
+# Deployment considerations and documentation
+deployment_considerations:
+  # Initialization requirements
+  initialization: "Vault requires initialization to generate unseal keys and root token"
+  # Auto-unseal configuration
+  auto_unseal: "AWS KMS is used for auto-unsealing to avoid manual intervention"
+  # High availability configuration
+  high_availability: "Raft storage backend with 3 nodes for high availability"
+  # Backup strategy
+  backup_strategy: "Regular snapshots of the Raft storage for disaster recovery"
+  # Certificate management
+  certificate_management: "TLS certificates required for secure communication"
+  # Service account setup
+  service_account_setup: "Kubernetes service accounts must be created with appropriate annotations"
+  # Secret rotation
+  secret_rotation: "Implement regular rotation of static secrets and root credentials"
+
+# Security considerations and best practices
+security_considerations:
+  # Principle of least privilege
+  principle_of_least_privilege: "Policies grant minimal required access to each service"
+  # Secret isolation
+  secret_isolation: "Each service can only access its own secrets"
+  # Encryption
+  encryption: "All communication with Vault is encrypted using TLS"
+  # Audit logging
+  audit_logging: "Enable audit logging for all Vault operations"
+  # Key rotation
+  key_rotation: "Regular rotation of encryption keys in the transit engine"
+  # Access control
+  access_control: "Multi-factor authentication for administrative access"
+  # Network security
+  network_security: "Restrict Vault access to authorized services only"
+
+# Environment variables used in the configuration
+environment_variables:
+  NODE_ID: "Unique identifier for each Vault node"
+  POD_IP: "IP address of the Vault pod"
+  DOMAIN_NAME: "Domain name for the Vault service"
+  AWS_REGION: "AWS region where Vault is deployed"
+  KMS_KEY_ID: "AWS KMS key ID for auto-unsealing"
+  KUBERNETES_CA_CERT: "Kubernetes CA certificate for authentication"
+  SERVICE_ACCOUNT_TOKEN: "Service account token for Kubernetes authentication"
+  AWS_ACCESS_KEY: "AWS access key for AWS authentication"
+  AWS_SECRET_KEY: "AWS secret key for AWS authentication"
+  DB_HOST: "PostgreSQL database host"
+  DB_PORT: "PostgreSQL database port"
+  DB_NAME: "PostgreSQL database name"
+  DB_ADMIN_USER: "PostgreSQL admin username"
+  DB_ADMIN_PASSWORD: "PostgreSQL admin password"
+  SERVICE_NAME: "Name of the service accessing Vault"
