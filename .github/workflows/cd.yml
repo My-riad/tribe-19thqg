@@ -1,0 +1,296 @@
+name: Tribe CD
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+      - development
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+      version:
+        description: 'Version tag to deploy'
+        required: false
+        type: string
+
+env:
+  NODE_VERSION: '18.x'
+  PYTHON_VERSION: '3.10'
+  AWS_REGION: 'us-east-1'
+  ECR_REPOSITORY: 'tribe'
+  TERRAFORM_VERSION: '1.5.0'
+  KUBECTL_VERSION: '1.27.0'
+  ARGOCD_VERSION: '2.7.0'
+
+jobs:
+  determine-environment:
+    name: Determine Environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+      deploy_version: ${{ steps.set-version.outputs.version }}
+    steps:
+      - name: Determine environment from branch or input
+        id: set-env
+        run: echo "environment=${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production') || (github.ref == 'refs/heads/staging' && 'staging') || 'development' }}" >> $GITHUB_OUTPUT
+      
+      - name: Generate version tag
+        id: set-version
+        run: echo "version=${{ github.event.inputs.version || github.sha }}" >> $GITHUB_OUTPUT
+
+  deploy-infrastructure:
+    name: Deploy Infrastructure
+    needs: determine-environment
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine-environment.outputs.environment }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
+      - name: Terraform Init
+        working-directory: infrastructure/terraform
+        run: terraform init -backend-config=environments/${{ needs.determine-environment.outputs.environment }}/backend.tfvars
+      
+      - name: Terraform Validate
+        working-directory: infrastructure/terraform
+        run: terraform validate
+      
+      - name: Terraform Plan
+        working-directory: infrastructure/terraform
+        run: terraform plan -var-file=environments/${{ needs.determine-environment.outputs.environment }}/terraform.tfvars -out=tfplan
+      
+      - name: Terraform Apply
+        working-directory: infrastructure/terraform
+        run: terraform apply -auto-approve tfplan
+      
+      - name: Extract Infrastructure Outputs
+        working-directory: infrastructure/terraform
+        run: terraform output -json > ../../infrastructure-outputs.json
+
+  build-and-push-images:
+    name: Build and Push Container Images
+    needs: [determine-environment, deploy-infrastructure]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine-environment.outputs.environment }}
+    strategy:
+      matrix:
+        service:
+          - api-gateway
+          - auth-service
+          - profile-service
+          - tribe-service
+          - matching-service
+          - event-service
+          - engagement-service
+          - planning-service
+          - payment-service
+          - notification-service
+          - ai-orchestration-service
+          - ai-engine
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: backend/Dockerfile
+          build-args: SERVICE_DIR=${{ matrix.service }}
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}/${{ matrix.service }}:${{ needs.determine-environment.outputs.deploy_version }},${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}/${{ matrix.service }}:latest
+
+  build-mobile-app:
+    name: Build Mobile App
+    needs: [determine-environment, deploy-infrastructure]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine-environment.outputs.environment }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/web/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: src/web
+        run: npm ci
+      
+      - name: Set environment variables
+        working-directory: src/web
+        run: echo "EXPO_PUBLIC_API_URL=${{ secrets.API_URL }}" > .env.${{ needs.determine-environment.outputs.environment }}
+      
+      - name: Build Android bundle
+        working-directory: src/web
+        run: npx expo export --platform android --env ${{ needs.determine-environment.outputs.environment }}
+      
+      - name: Build iOS bundle
+        working-directory: src/web
+        run: npx expo export --platform ios --env ${{ needs.determine-environment.outputs.environment }}
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: mobile-app-build
+          path: src/web/dist
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Upload to S3
+        run: aws s3 sync src/web/dist s3://${{ secrets.MOBILE_BUILDS_BUCKET }}/${{ needs.determine-environment.outputs.environment }}/${{ needs.determine-environment.outputs.deploy_version }} --delete
+
+  deploy-to-kubernetes:
+    name: Deploy to Kubernetes
+    needs: [determine-environment, deploy-infrastructure, build-and-push-images, build-mobile-app]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine-environment.outputs.environment }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+      
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
+      
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name tribe-${{ needs.determine-environment.outputs.environment }} --region ${{ env.AWS_REGION }}
+      
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/download/v${{ env.ARGOCD_VERSION }}/argocd-linux-amd64
+          chmod +x argocd
+          sudo mv argocd /usr/local/bin/
+      
+      - name: Login to ArgoCD
+        run: argocd login ${{ secrets.ARGOCD_SERVER }} --username ${{ secrets.ARGOCD_USERNAME }} --password ${{ secrets.ARGOCD_PASSWORD }} --insecure
+      
+      - name: Generate ArgoCD application manifests
+        run: envsubst < infrastructure/ci-cd/argocd-application.yaml > argocd-app-generated.yaml
+        env:
+          ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
+          GIT_REVISION: ${{ github.sha }}
+          DOMAIN_NAME: ${{ secrets.DOMAIN_NAME }}
+          IMAGE_TAG: ${{ needs.determine-environment.outputs.deploy_version }}
+          ECR_REPOSITORY_URI: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          CLUSTER_ENDPOINT: ${{ secrets.CLUSTER_ENDPOINT }}
+      
+      - name: Apply ArgoCD application
+        run: kubectl apply -f argocd-app-generated.yaml
+      
+      - name: Wait for sync
+        run: argocd app wait tribe-platform-${{ needs.determine-environment.outputs.environment }} --timeout 600
+
+  run-smoke-tests:
+    name: Run Smoke Tests
+    needs: [determine-environment, deploy-to-kubernetes]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine-environment.outputs.environment }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        working-directory: backend/tests
+        run: npm ci
+      
+      - name: Run smoke tests
+        working-directory: backend/tests
+        run: npm run test:smoke
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
+          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+
+  notify-deployment:
+    name: Send Deployment Notification
+    needs: [determine-environment, run-smoke-tests]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check deployment status
+        id: check
+        run: echo "status=${{ needs.run-smoke-tests.result == 'success' && 'success' || 'failure' }}" >> $GITHUB_OUTPUT
+      
+      - name: Send success notification
+        if: steps.check.outputs.status == 'success'
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_TITLE: 'Deployment Succeeded'
+          SLACK_MESSAGE: 'Tribe platform has been successfully deployed to ${{ needs.determine-environment.outputs.environment }} environment'
+          SLACK_COLOR: 'good'
+      
+      - name: Send failure notification
+        if: steps.check.outputs.status != 'success'
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_TITLE: 'Deployment Failed'
+          SLACK_MESSAGE: 'Deployment to ${{ needs.determine-environment.outputs.environment }} environment failed'
+          SLACK_COLOR: 'danger'
