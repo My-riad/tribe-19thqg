@@ -1,0 +1,106 @@
+{
+  "expo": {
+    "name": "Tribe",
+    "slug": "tribe",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./src/assets/images/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./src/assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "updates": {
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/your-project-id"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tribemobile",
+      "buildNumber": "1.0.0",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Tribe needs your location to find local events and connect you with nearby tribes.",
+        "NSLocationAlwaysUsageDescription": "Tribe needs your location to find local events and connect you with nearby tribes.",
+        "NSCameraUsageDescription": "Tribe needs camera access to let you take profile photos and check in at events.",
+        "NSPhotoLibraryUsageDescription": "Tribe needs access to your photo library to let you select profile pictures.",
+        "NSUserTrackingUsageDescription": "This identifier will be used to deliver personalized tribe matches and event recommendations to you.",
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
+      },
+      "config": {
+        "googleMapsApiKey": "YOUR_IOS_GOOGLE_MAPS_API_KEY"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./src/assets/images/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "package": "com.tribemobile",
+      "versionCode": 1,
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "YOUR_ANDROID_GOOGLE_MAPS_API_KEY"
+        }
+      }
+    },
+    "web": {
+      "favicon": "./src/assets/images/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "your-project-id"
+      }
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Tribe needs your location to find local events and connect you with nearby tribes."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Tribe needs camera access to let you take profile photos and check in at events."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./src/assets/images/notification-icon.png",
+          "color": "#ffffff"
+        }
+      ],
+      "expo-image-picker",
+      "expo-updates"
+    ],
+    "hooks": {
+      "postPublish": [
+        {
+          "file": "sentry-expo/upload-sourcemaps",
+          "config": {
+            "organization": "tribe",
+            "project": "tribe-mobile",
+            "authToken": "YOUR_SENTRY_AUTH_TOKEN"
+          }
+        }
+      ]
+    },
+    "scheme": "tribe"
+  }
+}
