@@ -53,7 +53,7 @@
   "author": "Tribe Team",
   "license": "UNLICENSED",
   "dependencies": {
-    "@prisma/client": "^4.16.0",
+    "@prisma/client": "^6.5.0",
     "dotenv": "^16.3.1"
   },
   "devDependencies": {
@@ -73,7 +73,7 @@
     "lint-staged": "^13.2.3",
     "nodemon": "^2.0.22",
     "prettier": "^2.8.8",
-    "prisma": "^4.16.0",
+    "prisma": "^6.5.0",
     "rimraf": "^5.0.1",
     "supertest": "^6.3.3",
     "ts-jest": "^29.1.1",
