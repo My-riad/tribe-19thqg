@@ -1,0 +1,288 @@
+# Pod Security Policies for the Tribe Platform
+# 
+# This file defines security constraints for pod execution across different workload types.
+# It implements defense-in-depth security controls by restricting pod privileges,
+# volume usage, and security contexts to enforce the principle of least privilege.
+#
+# DEPRECATION NOTICE: PodSecurityPolicy is deprecated in Kubernetes 1.21+ and will be
+# replaced by Pod Security Standards. This configuration should be migrated to
+# Pod Security Admission or a policy engine like OPA/Gatekeeper in future versions.
+
+# ----------------------------------------------------------
+# PodSecurityPolicies
+# ----------------------------------------------------------
+
+# Restricted PSP - for standard application workloads (API services, frontend services)
+# Enforces strict security controls for most application containers
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: restricted
+  annotations:
+    # Enforce default seccomp profile
+    seccomp.security.alpha.kubernetes.io/allowedProfileNames: 'runtime/default'
+    seccomp.security.alpha.kubernetes.io/defaultProfileName: 'runtime/default'
+    # Enforce default AppArmor profile
+    apparmor.security.beta.kubernetes.io/allowedProfileNames: 'runtime/default'
+    apparmor.security.beta.kubernetes.io/defaultProfileName: 'runtime/default'
+spec:
+  # Prevent privileged containers
+  privileged: false
+  # Prevent privilege escalation
+  allowPrivilegeEscalation: false
+  # Drop all capabilities
+  requiredDropCapabilities:
+    - ALL
+  # Allow only specific volume types
+  volumes:
+    - 'configMap'
+    - 'emptyDir'
+    - 'projected'
+    - 'secret'
+    - 'downwardAPI'
+    - 'persistentVolumeClaim'
+  # Prevent host network/IPC/PID access
+  hostNetwork: false
+  hostIPC: false
+  hostPID: false
+  # Force containers to run as non-root user
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  runAsGroup:
+    rule: 'MustRunAs'
+    ranges:
+      # Require GID >= 1000
+      - min: 1000
+        max: 65535
+  # Allow any SELinux context (controlled by other policies)
+  seLinux:
+    rule: 'RunAsAny'
+  # Require specific supplemental groups
+  supplementalGroups:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1000
+        max: 65535
+  # Require specific FSGroup
+  fsGroup:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1000
+        max: 65535
+  # Enforce read-only root filesystem
+  readOnlyRootFilesystem: true
+  # Prevent host path mounts
+  allowedHostPaths: []
+
+---
+# AI Services PSP - for AI and machine learning workloads
+# Provides additional capabilities needed for AI processing
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: ai-services
+  annotations:
+    seccomp.security.alpha.kubernetes.io/allowedProfileNames: 'runtime/default'
+    seccomp.security.alpha.kubernetes.io/defaultProfileName: 'runtime/default'
+    apparmor.security.beta.kubernetes.io/allowedProfileNames: 'runtime/default'
+    apparmor.security.beta.kubernetes.io/defaultProfileName: 'runtime/default'
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities:
+    - ALL
+  # Allow SYS_PTRACE for profiling and debugging AI models
+  allowedCapabilities:
+    - 'SYS_PTRACE'
+  volumes:
+    - 'configMap'
+    - 'emptyDir'
+    - 'projected'
+    - 'secret'
+    - 'downwardAPI'
+    - 'persistentVolumeClaim'
+  hostNetwork: false
+  hostIPC: false
+  hostPID: false
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  runAsGroup:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1000
+        max: 65535
+  seLinux:
+    rule: 'RunAsAny'
+  supplementalGroups:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1000
+        max: 65535
+  fsGroup:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1000
+        max: 65535
+  # Allow writable filesystem for model caching
+  readOnlyRootFilesystem: false
+  allowedHostPaths: []
+
+---
+# Monitoring PSP - for monitoring and observability tools
+# Provides necessary access for system monitoring
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: monitoring
+  annotations:
+    seccomp.security.alpha.kubernetes.io/allowedProfileNames: 'runtime/default'
+    seccomp.security.alpha.kubernetes.io/defaultProfileName: 'runtime/default'
+    apparmor.security.beta.kubernetes.io/allowedProfileNames: 'runtime/default'
+    apparmor.security.beta.kubernetes.io/defaultProfileName: 'runtime/default'
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities:
+    - ALL
+  # Allow SYS_ADMIN for metrics collection
+  allowedCapabilities:
+    - 'SYS_ADMIN'
+  # Allow additional volume types for monitoring
+  volumes:
+    - 'configMap'
+    - 'emptyDir'
+    - 'projected'
+    - 'secret'
+    - 'downwardAPI'
+    - 'persistentVolumeClaim'
+    - 'hostPath'
+  # Allow host network for prometheus node exporter
+  hostNetwork: true
+  hostIPC: false
+  # Allow host PID access for process monitoring
+  hostPID: true
+  # Allow flexible user settings for monitoring agents
+  runAsUser:
+    rule: 'RunAsAny'
+  runAsGroup:
+    rule: 'RunAsAny'
+  seLinux:
+    rule: 'RunAsAny'
+  supplementalGroups:
+    rule: 'RunAsAny'
+  fsGroup:
+    rule: 'RunAsAny'
+  # Allow writable filesystem for data collection
+  readOnlyRootFilesystem: false
+  # Allow specific host paths for metrics collection
+  allowedHostPaths:
+    - pathPrefix: '/var/log'
+      readOnly: true
+    - pathPrefix: '/proc'
+      readOnly: true
+    - pathPrefix: '/sys'
+      readOnly: true
+
+---
+# ----------------------------------------------------------
+# RBAC Configuration for PodSecurityPolicies
+# ----------------------------------------------------------
+
+# ClusterRole for using the restricted PSP
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: psp:restricted
+rules:
+  - apiGroups: ['policy']
+    resources: ['podsecuritypolicies']
+    verbs: ['use']
+    resourceNames: ['restricted']
+
+---
+# ClusterRole for using the ai-services PSP
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: psp:ai-services
+rules:
+  - apiGroups: ['policy']
+    resources: ['podsecuritypolicies']
+    verbs: ['use']
+    resourceNames: ['ai-services']
+
+---
+# ClusterRole for using the monitoring PSP
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: psp:monitoring
+rules:
+  - apiGroups: ['policy']
+    resources: ['podsecuritypolicies']
+    verbs: ['use']
+    resourceNames: ['monitoring']
+
+---
+# RoleBinding for api-services namespace to use restricted PSP
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: psp:restricted
+  namespace: api-services
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: psp:restricted
+subjects:
+  - kind: Group
+    name: system:serviceaccounts:api-services
+    apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for frontend-services namespace to use restricted PSP
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: psp:restricted
+  namespace: frontend-services
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: psp:restricted
+subjects:
+  - kind: Group
+    name: system:serviceaccounts:frontend-services
+    apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for ai-services namespace to use ai-services PSP
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: psp:ai-services
+  namespace: ai-services
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: psp:ai-services
+subjects:
+  - kind: Group
+    name: system:serviceaccounts:ai-services
+    apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for monitoring namespace to use monitoring PSP
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: psp:monitoring
+  namespace: monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: psp:monitoring
+subjects:
+  - kind: Group
+    name: system:serviceaccounts:monitoring
+    apiGroup: rbac.authorization.k8s.io
