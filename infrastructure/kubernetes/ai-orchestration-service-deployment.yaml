@@ -1,0 +1,182 @@
+# AI Orchestration Service Deployment
+# This deployment manages the central AI orchestration layer that coordinates AI capabilities
+# across the Tribe platform, integrating with both internal AI Engine and external OpenRouter API.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-orchestration-service
+  namespace: ai-services
+  labels:
+    app: ai-orchestration-service
+    part-of: tribe
+    tier: data-processing
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ai-orchestration-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: ai-orchestration-service
+        part-of: tribe
+        tier: data-processing
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3004"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: ai-orchestration-service
+        image: ${ECR_REPOSITORY_URI}/tribe/ai-orchestration-service:${IMAGE_TAG}
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3004
+          name: http
+        env:
+        - name: NODE_ENV
+          value: "${ENVIRONMENT}"
+        - name: PORT
+          value: "3004"
+        - name: OPENROUTER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-orchestration-secrets
+              key: openrouter-api-key
+        - name: AI_ENGINE_URL
+          value: "http://ai-engine.ai-services.svc.cluster.local"
+        - name: DEFAULT_AI_MODEL
+          value: "openai/gpt-4"
+        - name: AI_MODEL_TIMEOUT
+          value: "30"
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: redis-credentials
+              key: ai-orchestration-url
+        envFrom:
+        - configMapRef:
+            name: ai-orchestration-config
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 2
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          capabilities:
+            drop:
+            - ALL
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - ai-orchestration-service
+              topologyKey: kubernetes.io/hostname
+      terminationGracePeriodSeconds: 60
+---
+# Service to expose the AI Orchestration Service within the cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-orchestration-service
+  namespace: ai-services
+  labels:
+    app: ai-orchestration-service
+    part-of: tribe
+    tier: data-processing
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: http
+    protocol: TCP
+    name: http
+  selector:
+    app: ai-orchestration-service
+---
+# Horizontal Pod Autoscaler for automatic scaling based on CPU utilization
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ai-orchestration-service
+  namespace: ai-services
+  labels:
+    app: ai-orchestration-service
+    part-of: tribe
+    tier: data-processing
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ai-orchestration-service
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+---
+# Pod Disruption Budget to ensure high availability during voluntary disruptions
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ai-orchestration-service-pdb
+  namespace: ai-services
+  labels:
+    app: ai-orchestration-service
+    part-of: tribe
+    tier: data-processing
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: ai-orchestration-service
