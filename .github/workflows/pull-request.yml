@@ -37,7 +37,7 @@ jobs:
         run: git merge-tree $(git merge-base HEAD ${{ github.base_ref }}) ${{ github.base_ref }} HEAD | grep -A10 'changed in both' && exit 1 || exit 0
 
       - name: Check PR size
-        uses: pascalgn/size-label-action@v0.4.3
+        uses: pascalgn/size-label-action@v0.5.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
