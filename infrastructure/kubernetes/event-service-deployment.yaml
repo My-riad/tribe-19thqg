@@ -1,0 +1,183 @@
+# Event Service Deployment for Tribe Platform
+# Handles event discovery, recommendations, weather-based activity suggestions,
+# and event management functions for the Tribe application.
+# Kubernetes v1.27+
+
+---
+# Deployment defines the Event Service pods and their configuration
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-service
+  namespace: api-services
+  labels:
+    app: event-service
+    part-of: tribe
+    tier: backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: event-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0  # Zero-downtime deployment
+  template:
+    metadata:
+      labels:
+        app: event-service
+        part-of: tribe
+        tier: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3003"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: event-service
+        image: ${ECR_REPOSITORY_URI}/tribe/event-service:${IMAGE_TAG}
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3003
+          name: http
+        env:
+        - name: NODE_ENV
+          value: "${ENVIRONMENT}"
+        - name: PORT
+          value: "3003"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: event-service-url
+        envFrom:
+        - configMapRef:
+            name: event-service-config
+        - secretRef:
+            name: event-service-secrets
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 2
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          capabilities:
+            drop:
+            - ALL
+      # Pod anti-affinity ensures pods are distributed across nodes for high availability
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - event-service
+              topologyKey: kubernetes.io/hostname
+      terminationGracePeriodSeconds: 60
+
+---
+# Service exposes the Event Service within the cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: event-service
+  namespace: api-services
+  labels:
+    app: event-service
+    part-of: tribe
+    tier: backend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: http
+    protocol: TCP
+    name: http
+  selector:
+    app: event-service
+
+---
+# HorizontalPodAutoscaler automatically scales the Event Service based on CPU utilization
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: event-service
+  namespace: api-services
+  labels:
+    app: event-service
+    part-of: tribe
+    tier: backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: event-service
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+
+---
+# PodDisruptionBudget ensures high availability during voluntary disruptions
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: event-service-pdb
+  namespace: api-services
+  labels:
+    app: event-service
+    part-of: tribe
+    tier: backend
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: event-service
