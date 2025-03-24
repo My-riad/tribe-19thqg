@@ -28,7 +28,7 @@
   "license": "UNLICENSED",
   "dependencies": {
     "@openrouter/api": "^1.0.0",
-    "@prisma/client": "^4.16.0",
+    "@prisma/client": "^6.5.0",
     "@tribe/ai-orchestration-client": "^1.0.0",
     "@tribe/notification-service-client": "^1.0.0",
     "@tribe/shared": "^1.0.0",
