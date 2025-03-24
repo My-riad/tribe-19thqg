@@ -1,0 +1,642 @@
+# Kubernetes NetworkPolicy resources for Tribe platform
+# Implements a zero-trust network model where all communication is explicitly allowed
+
+# ========================================
+# Default Deny Policies
+# ========================================
+# These policies deny all ingress and egress traffic by default
+# They should be applied after all allow policies are in place
+
+---
+# Default deny all ingress and egress traffic in api-services namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: api-services
+spec:
+  podSelector: {}  # Applies to all pods in the namespace
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+# Default deny all ingress and egress traffic in frontend-services namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: frontend-services
+spec:
+  podSelector: {}  # Applies to all pods in the namespace
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+# Default deny all ingress and egress traffic in ai-services namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: ai-services
+spec:
+  podSelector: {}  # Applies to all pods in the namespace
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+# Default deny all ingress and egress traffic in monitoring namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: monitoring
+spec:
+  podSelector: {}  # Applies to all pods in the namespace
+  policyTypes:
+  - Ingress
+  - Egress
+
+# ========================================
+# External Access Policies
+# ========================================
+# These policies allow external traffic to enter the cluster via the ingress controller
+
+---
+# Allow ingress controller to access API Gateway
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller
+  namespace: api-services
+spec:
+  podSelector:
+    matchLabels:
+      app: api-gateway
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - port: 3000
+      protocol: TCP
+
+---
+# Allow ingress controller to access web frontend
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller
+  namespace: frontend-services
+spec:
+  podSelector:
+    matchLabels:
+      app: web-frontend
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - port: 3000
+      protocol: TCP
+
+# ========================================
+# API Gateway Communication Policies
+# ========================================
+# These policies define how the API Gateway communicates with backend services
+
+---
+# Allow API Gateway to access backend services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-gateway-to-services
+  namespace: api-services
+spec:
+  podSelector:
+    matchLabels:
+      app: api-gateway
+  policyTypes:
+  - Egress
+  egress:
+  # Allow connections to backend services in api-services namespace
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: api-services
+      podSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - auth-service
+          - profile-service
+          - tribe-service
+          - event-service
+          - matching-service
+          - engagement-service
+          - planning-service
+          - payment-service
+          - notification-service
+    ports:
+    - port: 3000
+      protocol: TCP
+  # Allow connections to AI Orchestration Service
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: ai-services
+      podSelector:
+        matchLabels:
+          app: ai-orchestration-service
+    ports:
+    - port: 3000
+      protocol: TCP
+
+---
+# Allow backend services to access API Gateway
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-services-to-api-gateway
+  namespace: api-services
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - auth-service
+      - profile-service
+      - tribe-service
+      - event-service
+      - matching-service
+      - engagement-service
+      - planning-service
+      - payment-service
+      - notification-service
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: api-services
+      podSelector:
+        matchLabels:
+          app: api-gateway
+    ports:
+    - port: 3000
+      protocol: TCP
+
+# ========================================
+# AI Services Communication Policies
+# ========================================
+# These policies define how AI services communicate with each other
+
+---
+# Allow API Gateway to access AI Orchestration Service
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ai-orchestration-service-ingress
+  namespace: ai-services
+spec:
+  podSelector:
+    matchLabels:
+      app: ai-orchestration-service
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: api-services
+      podSelector:
+        matchLabels:
+          app: api-gateway
+    ports:
+    - port: 3000
+      protocol: TCP
+
+---
+# Allow AI Orchestration Service to access AI Engine
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ai-orchestration-to-ai-engine
+  namespace: ai-services
+spec:
+  podSelector:
+    matchLabels:
+      app: ai-orchestration-service
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: ai-services
+      podSelector:
+        matchLabels:
+          app: ai-engine
+    ports:
+    - port: 8000
+      protocol: TCP
+
+---
+# Allow AI Orchestration Service to access AI Engine
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ai-engine-ingress
+  namespace: ai-services
+spec:
+  podSelector:
+    matchLabels:
+      app: ai-engine
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ai-services
+      podSelector:
+        matchLabels:
+          app: ai-orchestration-service
+    ports:
+    - port: 8000
+      protocol: TCP
+
+# ========================================
+# Database Access Policies
+# ========================================
+# These policies allow backend services to access databases
+
+---
+# Allow backend services to access database
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-services-to-database
+  namespace: api-services
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - auth-service
+      - profile-service
+      - tribe-service
+      - event-service
+      - matching-service
+      - engagement-service
+      - planning-service
+      - payment-service
+      - notification-service
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - ipBlock:
+        cidr: ${DATABASE_CIDR}  # e.g., 10.0.0.0/16 - defined as environment variable
+    ports:
+    - port: 5432
+      protocol: TCP
+
+---
+# Allow backend services to access Redis cache
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-services-to-redis
+  namespace: api-services
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - auth-service
+      - profile-service
+      - tribe-service
+      - event-service
+      - matching-service
+      - engagement-service
+      - planning-service
+      - payment-service
+      - notification-service
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - ipBlock:
+        cidr: ${REDIS_CIDR}  # e.g., 10.0.0.0/16 - defined as environment variable
+    ports:
+    - port: 6379
+      protocol: TCP
+
+# ========================================
+# External API Access Policies
+# ========================================
+# These policies allow specific services to access external APIs
+
+---
+# Allow specific services to access external APIs
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-services-to-external-apis
+  namespace: api-services
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - event-service      # For Eventbrite, Meetup APIs
+      - payment-service    # For Stripe, Venmo APIs
+      - notification-service  # For FCM, email providers
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0    # Allow all external IPs
+        except:            # Except private networks
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+    ports:
+    - port: 443
+      protocol: TCP
+
+---
+# Allow AI services to access OpenRouter API
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ai-services-to-external-apis
+  namespace: ai-services
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - ai-orchestration-service  # For OpenRouter API
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0    # Allow all external IPs
+        except:            # Except private networks
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+    ports:
+    - port: 443
+      protocol: TCP
+
+# ========================================
+# DNS Resolution Policies
+# ========================================
+# These policies allow all pods to perform DNS resolution
+
+---
+# Allow all pods in api-services namespace to perform DNS resolution
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-resolution
+  namespace: api-services
+spec:
+  podSelector: {}  # Applies to all pods
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+
+---
+# Allow all pods in frontend-services namespace to perform DNS resolution
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-resolution
+  namespace: frontend-services
+spec:
+  podSelector: {}  # Applies to all pods
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+
+---
+# Allow all pods in ai-services namespace to perform DNS resolution
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-resolution
+  namespace: ai-services
+spec:
+  podSelector: {}  # Applies to all pods
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+
+# ========================================
+# Monitoring Policies
+# ========================================
+# These policies allow Prometheus to scrape metrics from services
+
+---
+# Allow Prometheus to scrape metrics from api-services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-scrape
+  namespace: api-services
+spec:
+  podSelector: {}  # Applies to all pods
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+      podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - port: 3000
+      protocol: TCP
+
+---
+# Allow Prometheus to scrape metrics from frontend-services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-scrape
+  namespace: frontend-services
+spec:
+  podSelector: {}  # Applies to all pods
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+      podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - port: 3000
+      protocol: TCP
+
+---
+# Allow Prometheus to scrape metrics from ai-services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-scrape
+  namespace: ai-services
+spec:
+  podSelector: {}  # Applies to all pods
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+      podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - port: 3000
+      protocol: TCP
+    - port: 8000
+      protocol: TCP
+
+---
+# Allow Prometheus to scrape metrics from all namespaces
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-egress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app: prometheus
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector: {}  # All namespaces
+    ports:
+    - port: 3000
+      protocol: TCP
+    - port: 8000
+      protocol: TCP
+    - port: 9090
+      protocol: TCP
+
+---
+# Allow ingress controller to access Grafana
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-ingress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app: grafana
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - port: 3000
+      protocol: TCP
+
+# ========================================
+# Frontend to API Gateway Policy
+# ========================================
+# Allow frontend service to access API Gateway
+
+---
+# Allow frontend service to access API Gateway
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-to-api-gateway
+  namespace: frontend-services
+spec:
+  podSelector:
+    matchLabels:
+      app: web-frontend
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: api-services
+      podSelector:
+        matchLabels:
+          app: api-gateway
+    ports:
+    - port: 80
+      protocol: TCP
