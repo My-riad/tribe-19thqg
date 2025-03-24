@@ -1,0 +1,451 @@
+# Kubernetes ConfigMap resources for the Tribe platform
+# This file defines non-sensitive configuration parameters for microservices
+# Values in ${VARIABLE_NAME} format are environment variables replaced during deployment
+# Note: Sensitive data should be stored in Kubernetes Secrets, not ConfigMaps
+
+---
+# Global configuration shared across all services
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: global-config
+  namespace: api-services
+  labels:
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+data:
+  ENVIRONMENT: ${ENVIRONMENT}
+  LOG_LEVEL: ${LOG_LEVEL}
+  DOMAIN_NAME: ${DOMAIN_NAME}
+  API_BASE_URL: https://api.${DOMAIN_NAME}
+  WEB_BASE_URL: https://${DOMAIN_NAME}
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+  MAX_REQUEST_SIZE: 10m
+  DEFAULT_PAGINATION_LIMIT: "20"
+  MAX_PAGINATION_LIMIT: "100"
+  FEATURE_FLAGS: ${FEATURE_FLAGS}
+
+---
+# API Gateway Service Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-config
+  namespace: api-services
+  labels:
+    app: api-gateway
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+data:
+  PORT: "3000"
+  LOG_LEVEL: ${LOG_LEVEL}
+  RATE_LIMIT_WINDOW_MS: "60000"
+  RATE_LIMIT_MAX_REQUESTS: "300"
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+  REQUEST_TIMEOUT_MS: "60000"
+  AUTH_SERVICE_URL: http://auth-service.api-services.svc.cluster.local
+  PROFILE_SERVICE_URL: http://profile-service.api-services.svc.cluster.local
+  TRIBE_SERVICE_URL: http://tribe-service.api-services.svc.cluster.local
+  EVENT_SERVICE_URL: http://event-service.api-services.svc.cluster.local
+  MATCHING_SERVICE_URL: http://matching-service.api-services.svc.cluster.local
+  ENGAGEMENT_SERVICE_URL: http://engagement-service.api-services.svc.cluster.local
+  PLANNING_SERVICE_URL: http://planning-service.api-services.svc.cluster.local
+  PAYMENT_SERVICE_URL: http://payment-service.api-services.svc.cluster.local
+  NOTIFICATION_SERVICE_URL: http://notification-service.api-services.svc.cluster.local
+  AI_ORCHESTRATION_SERVICE_URL: http://ai-orchestration-service.ai-services.svc.cluster.local
+  ENABLE_REQUEST_LOGGING: "true"
+  ENABLE_RESPONSE_COMPRESSION: "true"
+  ENABLE_RATE_LIMITING: "true"
+  ENABLE_CIRCUIT_BREAKER: "true"
+  CIRCUIT_BREAKER_TIMEOUT_MS: "5000"
+  CIRCUIT_BREAKER_RESET_TIMEOUT_MS: "30000"
+  CIRCUIT_BREAKER_ERROR_THRESHOLD_PERCENTAGE: "50"
+
+---
+# Authentication Service Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-service-config
+  namespace: api-services
+  labels:
+    app: auth-service
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+data:
+  PORT: "3001"
+  LOG_LEVEL: ${LOG_LEVEL}
+  JWT_EXPIRATION: "900"
+  REFRESH_TOKEN_EXPIRATION: "604800"
+  PASSWORD_HASH_ROUNDS: "12"
+  MAX_LOGIN_ATTEMPTS: "5"
+  LOGIN_LOCKOUT_DURATION: "900"
+  ENABLE_SOCIAL_LOGIN: "true"
+  ENABLE_MFA: ${ENABLE_MFA}
+  PROFILE_SERVICE_URL: http://profile-service.api-services.svc.cluster.local
+  NOTIFICATION_SERVICE_URL: http://notification-service.api-services.svc.cluster.local
+  AUTH0_DOMAIN: ${AUTH0_DOMAIN}
+  AUTH0_AUDIENCE: https://api.${DOMAIN_NAME}
+  AUTH0_ISSUER_BASE_URL: https://${AUTH0_DOMAIN}
+  PASSWORD_POLICY_MIN_LENGTH: "10"
+  PASSWORD_POLICY_REQUIRE_UPPERCASE: "true"
+  PASSWORD_POLICY_REQUIRE_LOWERCASE: "true"
+  PASSWORD_POLICY_REQUIRE_NUMBERS: "true"
+  PASSWORD_POLICY_REQUIRE_SYMBOLS: "true"
+
+---
+# Profile Service Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: profile-service-config
+  namespace: api-services
+  labels:
+    app: profile-service
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+data:
+  PORT: "3002"
+  LOG_LEVEL: ${LOG_LEVEL}
+  PERSONALITY_TRAITS_COUNT: "5"
+  MIN_INTERESTS_REQUIRED: "3"
+  MAX_INTERESTS_ALLOWED: "10"
+  ENABLE_PROFILE_CACHING: "true"
+  PROFILE_CACHE_TTL: "3600"
+  AI_ORCHESTRATION_SERVICE_URL: http://ai-orchestration-service.ai-services.svc.cluster.local
+  MEDIA_STORAGE_BUCKET: ${MEDIA_STORAGE_BUCKET}
+  MEDIA_CDN_BASE_URL: ${MEDIA_CDN_BASE_URL}
+  MAX_PROFILE_IMAGE_SIZE_KB: "5120"
+  ALLOWED_PROFILE_IMAGE_TYPES: image/jpeg,image/png,image/webp
+  ENABLE_PROFILE_COMPLETION_REMINDERS: "true"
+
+---
+# Tribe Service Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tribe-service-config
+  namespace: api-services
+  labels:
+    app: tribe-service
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+data:
+  PORT: "3003"
+  LOG_LEVEL: ${LOG_LEVEL}
+  MIN_TRIBE_SIZE: "4"
+  MAX_TRIBE_SIZE: "8"
+  MAX_TRIBES_PER_USER: "3"
+  ENABLE_TRIBE_CHAT: "true"
+  CHAT_MESSAGE_MAX_LENGTH: "1000"
+  CHAT_HISTORY_DAYS: "30"
+  ENABLE_TRIBE_ACTIVITY_FEED: "true"
+  ACTIVITY_FEED_MAX_ITEMS: "50"
+  MATCHING_SERVICE_URL: http://matching-service.api-services.svc.cluster.local
+  PROFILE_SERVICE_URL: http://profile-service.api-services.svc.cluster.local
+  NOTIFICATION_SERVICE_URL: http://notification-service.api-services.svc.cluster.local
+  ENGAGEMENT_SERVICE_URL: http://engagement-service.api-services.svc.cluster.local
+  MEDIA_STORAGE_BUCKET: ${MEDIA_STORAGE_BUCKET}
+  MEDIA_CDN_BASE_URL: ${MEDIA_CDN_BASE_URL}
+  MAX_TRIBE_IMAGE_SIZE_KB: "5120"
+  ALLOWED_TRIBE_IMAGE_TYPES: image/jpeg,image/png,image/webp
+  INACTIVE_TRIBE_THRESHOLD_DAYS: "30"
+  DISSOLVED_TRIBE_THRESHOLD_DAYS: "90"
+
+---
+# Matching Service Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: matching-service-config
+  namespace: api-services
+  labels:
+    app: matching-service
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+data:
+  PORT: "3004"
+  LOG_LEVEL: ${LOG_LEVEL}
+  MATCHING_BATCH_SIZE: "1000"
+  MATCHING_SCHEDULE_CRON: "0 0 * * *"
+  MIN_COMPATIBILITY_THRESHOLD: "70"
+  MAX_GEOGRAPHIC_DISTANCE_MILES: "15"
+  ENABLE_PERSONALITY_WEIGHTING: "true"
+  ENABLE_INTEREST_WEIGHTING: "true"
+  ENABLE_LOCATION_WEIGHTING: "true"
+  PERSONALITY_WEIGHT: "0.5"
+  INTEREST_WEIGHT: "0.3"
+  LOCATION_WEIGHT: "0.2"
+  TRIBE_SERVICE_URL: http://tribe-service.api-services.svc.cluster.local
+  PROFILE_SERVICE_URL: http://profile-service.api-services.svc.cluster.local
+  AI_ORCHESTRATION_SERVICE_URL: http://ai-orchestration-service.ai-services.svc.cluster.local
+  NOTIFICATION_SERVICE_URL: http://notification-service.api-services.svc.cluster.local
+  ENABLE_AUTO_MATCHING: "true"
+  ENABLE_MANUAL_MATCHING_OVERRIDE: "true"
+  MATCHING_RESULT_CACHE_TTL: "86400"
+
+---
+# Event Service Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: event-service-config
+  namespace: api-services
+  labels:
+    app: event-service
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+data:
+  PORT: "3005"
+  LOG_LEVEL: ${LOG_LEVEL}
+  EVENT_CACHE_TTL: "300"
+  WEATHER_CACHE_TTL: "3600"
+  VENUE_CACHE_TTL: "86400"
+  MAX_EVENTS_PER_TRIBE: "10"
+  DEFAULT_EVENT_RADIUS_MILES: "10"
+  MAX_EVENT_RADIUS_MILES: "50"
+  ENABLE_EXTERNAL_EVENTS: "true"
+  ENABLE_WEATHER_INTEGRATION: "true"
+  ENABLE_VENUE_RECOMMENDATIONS: "true"
+  TRIBE_SERVICE_URL: http://tribe-service.api-services.svc.cluster.local
+  PROFILE_SERVICE_URL: http://profile-service.api-services.svc.cluster.local
+  PLANNING_SERVICE_URL: http://planning-service.api-services.svc.cluster.local
+  AI_ORCHESTRATION_SERVICE_URL: http://ai-orchestration-service.ai-services.svc.cluster.local
+  NOTIFICATION_SERVICE_URL: http://notification-service.api-services.svc.cluster.local
+  EVENTBRITE_API_BASE_URL: https://www.eventbriteapi.com/v3
+  MEETUP_API_BASE_URL: https://api.meetup.com/gql
+  GOOGLE_PLACES_API_BASE_URL: https://maps.googleapis.com/maps/api/place
+  OPENWEATHERMAP_API_BASE_URL: https://api.openweathermap.org/data/2.5
+  MEDIA_STORAGE_BUCKET: ${MEDIA_STORAGE_BUCKET}
+  MEDIA_CDN_BASE_URL: ${MEDIA_CDN_BASE_URL}
+  MAX_EVENT_IMAGE_SIZE_KB: "5120"
+  ALLOWED_EVENT_IMAGE_TYPES: image/jpeg,image/png,image/webp
+
+---
+# Engagement Service Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: engagement-service-config
+  namespace: api-services
+  labels:
+    app: engagement-service
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+data:
+  PORT: "3006"
+  LOG_LEVEL: ${LOG_LEVEL}
+  PROMPT_CACHE_TTL: "86400"
+  CHALLENGE_CACHE_TTL: "86400"
+  LOW_ENGAGEMENT_THRESHOLD_DAYS: "7"
+  MEDIUM_ENGAGEMENT_THRESHOLD_DAYS: "3"
+  HIGH_ENGAGEMENT_THRESHOLD_DAYS: "1"
+  PROMPT_SCHEDULE_CRON: "0 12 * * *"
+  MAX_PROMPTS_PER_DAY: "3"
+  MAX_CHALLENGES_PER_WEEK: "2"
+  ENABLE_AI_PROMPTS: "true"
+  ENABLE_CHALLENGES: "true"
+  TRIBE_SERVICE_URL: http://tribe-service.api-services.svc.cluster.local
+  PROFILE_SERVICE_URL: http://profile-service.api-services.svc.cluster.local
+  AI_ORCHESTRATION_SERVICE_URL: http://ai-orchestration-service.ai-services.svc.cluster.local
+  NOTIFICATION_SERVICE_URL: http://notification-service.api-services.svc.cluster.local
+  ENGAGEMENT_METRICS_RETENTION_DAYS: "90"
+  ENABLE_ENGAGEMENT_ANALYTICS: "true"
+
+---
+# Planning Service Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: planning-service-config
+  namespace: api-services
+  labels:
+    app: planning-service
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+data:
+  PORT: "3007"
+  LOG_LEVEL: ${LOG_LEVEL}
+  AVAILABILITY_COLLECTION_WINDOW_HOURS: "48"
+  AVAILABILITY_REMINDER_HOURS: "24"
+  MIN_ATTENDEES_PERCENTAGE: "50"
+  OPTIMAL_ATTENDEES_PERCENTAGE: "75"
+  VENUE_RECOMMENDATION_COUNT: "3"
+  ENABLE_AI_SCHEDULING: "true"
+  ENABLE_VENUE_BOOKING: ${ENABLE_VENUE_BOOKING}
+  ENABLE_CALENDAR_INTEGRATION: "true"
+  TRIBE_SERVICE_URL: http://tribe-service.api-services.svc.cluster.local
+  EVENT_SERVICE_URL: http://event-service.api-services.svc.cluster.local
+  PROFILE_SERVICE_URL: http://profile-service.api-services.svc.cluster.local
+  PAYMENT_SERVICE_URL: http://payment-service.api-services.svc.cluster.local
+  AI_ORCHESTRATION_SERVICE_URL: http://ai-orchestration-service.ai-services.svc.cluster.local
+  NOTIFICATION_SERVICE_URL: http://notification-service.api-services.svc.cluster.local
+  GOOGLE_CALENDAR_API_BASE_URL: https://www.googleapis.com/calendar/v3
+  APPLE_CALENDAR_API_BASE_URL: https://api.apple-cloudkit.com/database/1
+  MICROSOFT_GRAPH_API_BASE_URL: https://graph.microsoft.com/v1.0
+  PLANNING_REMINDER_SCHEDULE_CRON: "0 9 * * *"
+
+---
+# Payment Service Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payment-service-config
+  namespace: api-services
+  labels:
+    app: payment-service
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+data:
+  PORT: "3008"
+  LOG_LEVEL: ${LOG_LEVEL}
+  ENABLE_PAYMENT_PROCESSING: ${ENABLE_PAYMENT_PROCESSING}
+  ENABLE_EXPENSE_SPLITTING: "true"
+  DEFAULT_CURRENCY: "USD"
+  PAYMENT_EXPIRATION_HOURS: "72"
+  PAYMENT_REMINDER_HOURS: "24"
+  TRANSACTION_HISTORY_MONTHS: "12"
+  STRIPE_API_VERSION: "2023-10-16"
+  STRIPE_WEBHOOK_TOLERANCE_SECONDS: "300"
+  VENMO_API_VERSION: "v1"
+  PROFILE_SERVICE_URL: http://profile-service.api-services.svc.cluster.local
+  TRIBE_SERVICE_URL: http://tribe-service.api-services.svc.cluster.local
+  EVENT_SERVICE_URL: http://event-service.api-services.svc.cluster.local
+  NOTIFICATION_SERVICE_URL: http://notification-service.api-services.svc.cluster.local
+  ENABLE_PAYMENT_ANALYTICS: "true"
+  PAYMENT_METHODS_CACHE_TTL: "86400"
+
+---
+# Notification Service Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notification-service-config
+  namespace: api-services
+  labels:
+    app: notification-service
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+data:
+  PORT: "3009"
+  LOG_LEVEL: ${LOG_LEVEL}
+  NOTIFICATION_RETENTION_DAYS: "30"
+  ENABLE_PUSH_NOTIFICATIONS: "true"
+  ENABLE_EMAIL_NOTIFICATIONS: "true"
+  ENABLE_SMS_NOTIFICATIONS: ${ENABLE_SMS_NOTIFICATIONS}
+  DEFAULT_NOTIFICATION_CHANNEL: "push"
+  EMAIL_FROM_ADDRESS: notifications@${DOMAIN_NAME}
+  EMAIL_FROM_NAME: "Tribe"
+  PUSH_NOTIFICATION_TTL_SECONDS: "604800"
+  NOTIFICATION_BATCH_SIZE: "100"
+  NOTIFICATION_PROCESSING_INTERVAL_MS: "1000"
+  PROFILE_SERVICE_URL: http://profile-service.api-services.svc.cluster.local
+  FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
+  SENDGRID_API_BASE_URL: https://api.sendgrid.com/v3
+  TWILIO_API_BASE_URL: https://api.twilio.com/2010-04-01
+  NOTIFICATION_DELIVERY_RETRY_COUNT: "3"
+  NOTIFICATION_DELIVERY_RETRY_DELAY_MS: "60000"
+
+---
+# AI Orchestration Service Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-orchestration-service-config
+  namespace: ai-services
+  labels:
+    app: ai-orchestration-service
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+data:
+  PORT: "3010"
+  LOG_LEVEL: ${LOG_LEVEL}
+  DEFAULT_MODEL: "gpt-4"
+  FALLBACK_MODEL: "gpt-3.5-turbo"
+  ENABLE_MODEL_CACHING: "true"
+  MODEL_CACHE_TTL: "3600"
+  MAX_TOKENS_PER_REQUEST: "4096"
+  DEFAULT_TEMPERATURE: "0.7"
+  MATCHING_TEMPERATURE: "0.2"
+  ENGAGEMENT_TEMPERATURE: "0.8"
+  RECOMMENDATION_TEMPERATURE: "0.6"
+  PERSONALITY_TEMPERATURE: "0.3"
+  REQUEST_TIMEOUT_MS: "30000"
+  RETRY_COUNT: "3"
+  RETRY_DELAY_MS: "1000"
+  OPENROUTER_API_BASE_URL: https://openrouter.ai/api/v1
+  OPENAI_API_BASE_URL: https://api.openai.com/v1
+  ANTHROPIC_API_BASE_URL: https://api.anthropic.com/v1
+  ENABLE_REQUEST_LOGGING: ${ENABLE_AI_REQUEST_LOGGING}
+  ENABLE_RESPONSE_LOGGING: ${ENABLE_AI_RESPONSE_LOGGING}
+  ENABLE_PROMPT_OPTIMIZATION: "true"
+  ENABLE_COST_TRACKING: "true"
+  AI_ENGINE_URL: http://ai-engine.ai-services.svc.cluster.local
+
+---
+# AI Engine Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-engine-config
+  namespace: ai-services
+  labels:
+    app: ai-engine
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+data:
+  PORT: "8000"
+  LOG_LEVEL: ${LOG_LEVEL}
+  WORKERS: "4"
+  TIMEOUT: "120"
+  KEEP_ALIVE: "5"
+  MAX_REQUESTS: "1000"
+  MAX_REQUESTS_JITTER: "50"
+  ENABLE_MODEL_CACHING: "true"
+  MODEL_CACHE_SIZE: "1024"
+  ENABLE_PREPROCESSING: "true"
+  ENABLE_POSTPROCESSING: "true"
+  MATCHING_MODEL_PATH: "/models/matching"
+  PERSONALITY_MODEL_PATH: "/models/personality"
+  ENGAGEMENT_MODEL_PATH: "/models/engagement"
+  RECOMMENDATION_MODEL_PATH: "/models/recommendation"
+  OPENROUTER_API_BASE_URL: https://openrouter.ai/api/v1
+  REQUEST_TIMEOUT_SECONDS: "30"
+  RETRY_COUNT: "3"
+  RETRY_DELAY_SECONDS: "1"
+  ENABLE_TELEMETRY: "true"
+  ENABLE_PROFILING: ${ENABLE_AI_PROFILING}
+  BATCH_SIZE: "16"
+
+---
+# Web Frontend Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-frontend-config
+  namespace: frontend-services
+  labels:
+    app: web-frontend
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+data:
+  PORT: "3000"
+  NODE_ENV: ${ENVIRONMENT}
+  API_BASE_URL: https://api.${DOMAIN_NAME}
+  MEDIA_CDN_BASE_URL: ${MEDIA_CDN_BASE_URL}
+  AUTH0_DOMAIN: ${AUTH0_DOMAIN}
+  AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID}
+  AUTH0_AUDIENCE: https://api.${DOMAIN_NAME}
+  AUTH0_SCOPE: "openid profile email"
+  ENABLE_ANALYTICS: ${ENABLE_ANALYTICS}
+  GOOGLE_ANALYTICS_ID: ${GOOGLE_ANALYTICS_ID}
+  MIXPANEL_TOKEN: ${MIXPANEL_TOKEN}
+  FEATURE_FLAGS: ${FEATURE_FLAGS}
+  ENABLE_ERROR_REPORTING: "true"
+  SENTRY_DSN: ${SENTRY_DSN}
+  ENABLE_PERFORMANCE_MONITORING: "true"
+  CACHE_TTL_SECONDS: "300"
+  ENABLE_SERVICE_WORKER: ${ENABLE_SERVICE_WORKER}
+  ENABLE_OFFLINE_MODE: ${ENABLE_OFFLINE_MODE}
+  MAX_OFFLINE_STORAGE_MB: "50"
+  FIREBASE_CONFIG: ${FIREBASE_CONFIG}
