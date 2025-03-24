@@ -1,0 +1,347 @@
+name: Pull Request Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main, staging, development]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+
+env:
+  NODE_VERSION: 18.x
+  PYTHON_VERSION: 3.10
+  COVERAGE_THRESHOLD_FRONTEND: 80
+  COVERAGE_THRESHOLD_BACKEND: 85
+
+jobs:
+  validate-pr:
+    name: Validate PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Validate PR title
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: ['feat', 'fix', 'docs', 'style', 'refactor', 'perf', 'test', 'build', 'ci', 'chore', 'revert']
+          requireScope: false
+
+      - name: Check for merge conflicts
+        run: git merge-tree $(git merge-base HEAD ${{ github.base_ref }}) ${{ github.base_ref }} HEAD | grep -A10 'changed in both' && exit 1 || exit 0
+
+      - name: Check PR size
+        uses: pascalgn/size-label-action@v0.4.3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          sizes: >
+            {
+              "xs": "< 10",
+              "small": "10-99",
+              "medium": "100-499",
+              "large": "500-999",
+              "xl": "1000-1999",
+              "xxl": ">= 2000"
+            }
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project: [frontend, backend]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies (Frontend)
+        if: matrix.project == 'frontend'
+        working-directory: src/web
+        run: npm ci
+
+      - name: Install dependencies (Backend)
+        if: matrix.project == 'backend'
+        working-directory: backend
+        run: npm ci
+
+      - name: Run linting (Frontend)
+        if: matrix.project == 'frontend'
+        working-directory: src/web
+        run: npm run lint
+
+      - name: Run linting (Backend)
+        if: matrix.project == 'backend'
+        working-directory: backend
+        run: npm run lint
+
+      - name: Run type checking (Frontend)
+        if: matrix.project == 'frontend'
+        working-directory: src/web
+        run: npm run typecheck
+
+  test-frontend:
+    name: Test Frontend
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: src/web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: src/web
+        run: npm ci
+
+      - name: Run tests
+        working-directory: src/web
+        run: npm run test
+
+      - name: Generate coverage report
+        working-directory: src/web
+        run: npm run test:coverage
+
+      - name: Check coverage thresholds
+        working-directory: src/web
+        run: npx istanbul check-coverage --statements ${{ env.COVERAGE_THRESHOLD_FRONTEND }} --branches ${{ env.COVERAGE_THRESHOLD_FRONTEND }} --functions ${{ env.COVERAGE_THRESHOLD_FRONTEND }} --lines ${{ env.COVERAGE_THRESHOLD_FRONTEND }}
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-coverage
+          path: src/web/coverage
+
+  test-backend:
+    name: Test Backend
+    runs-on: ubuntu-latest
+    needs: lint
+    services:
+      postgres:
+        image: postgis/postgis:15-3.3
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tribe_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run database migrations
+        working-directory: backend
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tribe_test
+
+      - name: Run unit tests
+        working-directory: backend
+        run: npm run test:unit
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tribe_test
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+          JWT_SECRET: test_jwt_secret
+          OPENROUTER_API_KEY: test_openrouter_key
+
+      - name: Run integration tests
+        working-directory: backend
+        run: npm run test:integration
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tribe_test
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+          JWT_SECRET: test_jwt_secret
+          OPENROUTER_API_KEY: test_openrouter_key
+
+      - name: Generate coverage report
+        working-directory: backend
+        run: npm run test:coverage
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tribe_test
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+
+      - name: Check coverage thresholds
+        working-directory: backend
+        run: npx istanbul check-coverage --statements ${{ env.COVERAGE_THRESHOLD_BACKEND }} --branches ${{ env.COVERAGE_THRESHOLD_BACKEND }} --functions ${{ env.COVERAGE_THRESHOLD_BACKEND }} --lines ${{ env.COVERAGE_THRESHOLD_BACKEND }}
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+          name: backend-coverage
+          path: backend/coverage
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Run dependency vulnerability scan (Frontend)
+        working-directory: src/web
+        run: npm audit --production --audit-level=high
+
+      - name: Run dependency vulnerability scan (Backend)
+        working-directory: backend
+        run: npm audit --production --audit-level=high
+
+      - name: Setup CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: javascript, typescript
+
+      - name: Run CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+
+  build-check:
+    name: Build Check
+    runs-on: ubuntu-latest
+    needs: [test-frontend, test-backend]
+    strategy:
+      matrix:
+        project: [frontend, backend]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Setup Python (Backend only)
+        if: matrix.project == 'backend'
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies (Frontend)
+        if: matrix.project == 'frontend'
+        working-directory: src/web
+        run: npm ci
+
+      - name: Install dependencies (Backend)
+        if: matrix.project == 'backend'
+        working-directory: backend
+        run: npm ci
+
+      - name: Build check (Frontend)
+        if: matrix.project == 'frontend'
+        working-directory: src/web
+        run: npm run build
+
+      - name: Build check (Backend)
+        if: matrix.project == 'backend'
+        working-directory: backend
+        run: npm run build
+
+  pr-feedback:
+    name: PR Feedback
+    runs-on: ubuntu-latest
+    needs: [validate-pr, lint, test-frontend, test-backend, security-scan, build-check]
+    if: always()
+    steps:
+      - name: Check workflow status
+        id: check
+        run: echo "status=${{ job.status }}" >> $GITHUB_OUTPUT
+
+      - name: Download frontend coverage
+        uses: actions/download-artifact@v3
+        with:
+          name: frontend-coverage
+          path: frontend-coverage
+
+      - name: Download backend coverage
+        uses: actions/download-artifact@v3
+        with:
+          name: backend-coverage
+          path: backend-coverage
+
+      - name: Post coverage comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: test-coverage
+          message: |
+            ### Test Coverage Summary
+
+            #### Frontend
+            ```
+            $(cat frontend-coverage/coverage-summary.json | jq -r '.total | "Statements: \(.statements.pct)%, Branches: \(.branches.pct)%, Functions: \(.functions.pct)%, Lines: \(.lines.pct)%"')
+            ```
+
+            #### Backend
+            ```
+            $(cat backend-coverage/coverage-summary.json | jq -r '.total | "Statements: \(.statements.pct)%, Branches: \(.branches.pct)%, Functions: \(.functions.pct)%, Lines: \(.lines.pct)%"')
+            ```
+
+      - name: Add success status
+        if: steps.check.outputs.status == 'success'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pr-validation
+          message: |
+            ✅ **All checks have passed!**
+
+            This pull request meets all the required quality standards.
+
+      - name: Add failure status
+        if: steps.check.outputs.status != 'success'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pr-validation
+          message: |
+            ❌ **Some checks have failed!**
+
+            Please review the workflow results and fix the issues before merging.
