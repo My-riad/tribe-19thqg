@@ -1,0 +1,449 @@
+name: Tribe CI
+
+on:
+  push:
+    branches:
+      - development
+      - 'feature/*'
+      - 'bugfix/*'
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: 18.x
+  PYTHON_VERSION: '3.10'
+  EXPO_CLI_VERSION: 6.3.2
+  COVERAGE_THRESHOLD_FRONTEND: 80
+  COVERAGE_THRESHOLD_BACKEND: 85
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project: [frontend, backend]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies (Frontend)
+        if: matrix.project == 'frontend'
+        working-directory: src/web
+        run: npm ci
+
+      - name: Install dependencies (Backend)
+        if: matrix.project == 'backend'
+        working-directory: backend
+        run: npm ci
+
+      - name: Run linting (Frontend)
+        if: matrix.project == 'frontend'
+        working-directory: src/web
+        run: npm run lint
+
+      - name: Run linting (Backend)
+        if: matrix.project == 'backend'
+        working-directory: backend
+        run: npm run lint
+
+      - name: Run type checking (Frontend)
+        if: matrix.project == 'frontend'
+        working-directory: src/web
+        run: npm run typecheck
+
+  test-frontend:
+    name: Test Frontend
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: src/web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: src/web
+        run: npm ci
+
+      - name: Run tests
+        working-directory: src/web
+        run: npm run test
+
+      - name: Generate coverage report
+        working-directory: src/web
+        run: npm run test:coverage
+
+      - name: Check coverage thresholds
+        working-directory: src/web
+        run: npx istanbul check-coverage --statements ${{ env.COVERAGE_THRESHOLD_FRONTEND }} --branches ${{ env.COVERAGE_THRESHOLD_FRONTEND }} --functions ${{ env.COVERAGE_THRESHOLD_FRONTEND }} --lines ${{ env.COVERAGE_THRESHOLD_FRONTEND }}
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-coverage
+          path: src/web/coverage
+
+  test-backend:
+    name: Test Backend
+    runs-on: ubuntu-latest
+    needs: lint
+    services:
+      postgres:
+        image: postgis/postgis:15-3.3
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tribe_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run database migrations
+        working-directory: backend
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tribe_test
+
+      - name: Run unit tests
+        working-directory: backend
+        run: npm run test:unit
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tribe_test
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+          JWT_SECRET: test_jwt_secret
+          OPENROUTER_API_KEY: test_openrouter_key
+
+      - name: Run integration tests
+        working-directory: backend
+        run: npm run test:integration
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tribe_test
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+          JWT_SECRET: test_jwt_secret
+          OPENROUTER_API_KEY: test_openrouter_key
+
+      - name: Generate coverage report
+        working-directory: backend
+        run: npm run test:coverage
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tribe_test
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+
+      - name: Check coverage thresholds
+        working-directory: backend
+        run: npx istanbul check-coverage --statements ${{ env.COVERAGE_THRESHOLD_BACKEND }} --branches ${{ env.COVERAGE_THRESHOLD_BACKEND }} --functions ${{ env.COVERAGE_THRESHOLD_BACKEND }} --lines ${{ env.COVERAGE_THRESHOLD_BACKEND }}
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+          name: backend-coverage
+          path: backend/coverage
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Run dependency vulnerability scan (Frontend)
+        working-directory: src/web
+        run: npm audit --production --audit-level=high
+
+      - name: Run dependency vulnerability scan (Backend)
+        working-directory: backend
+        run: npm audit --production --audit-level=high
+
+      - name: Setup CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: javascript, typescript
+
+      - name: Run CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    needs: [test-frontend]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: src/web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: src/web
+        run: npm ci
+
+      - name: Install Expo CLI
+        run: npm install -g expo-cli@${{ env.EXPO_CLI_VERSION }}
+
+      - name: Set environment-specific variables
+        run: echo "EXPO_PUBLIC_API_URL=https://api.dev.tribeapp.com" >> src/web/.env.development
+
+      - name: Build Android bundle
+        working-directory: src/web
+        run: npx expo export --platform android --env development
+
+      - name: Build iOS bundle
+        working-directory: src/web
+        run: npx expo export --platform ios --env development
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-build
+          path: src/web/dist
+
+  build-backend:
+    name: Build Backend
+    runs-on: ubuntu-latest
+    needs: [test-backend]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Build services
+        working-directory: backend
+        run: npm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: backend-build
+          path: backend/dist
+
+  build-containers:
+    name: Build Containers
+    runs-on: ubuntu-latest
+    needs: [build-backend]
+    if: github.ref == 'refs/heads/development'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Download backend build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: backend-build
+          path: backend/dist
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to container registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.REGISTRY_URL }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Generate version tag
+        id: version
+        run: echo "tag=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+
+      - name: Build and push shared library
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          build-args: SERVICE_DIR=shared
+          tags: ${{ secrets.REGISTRY_URL }}/tribe/shared:${{ steps.version.outputs.tag }}-development
+
+      - name: Build and push microservices
+        run: bash backend/scripts/deploy.sh development --version ${{ steps.version.outputs.tag }}
+
+  e2e-tests:
+    name: End-to-End Tests
+    runs-on: ubuntu-latest
+    needs: [build-frontend, build-backend]
+    if: github.ref == 'refs/heads/development'
+    services:
+      postgres:
+        image: postgis/postgis:15-3.3
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tribe_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Download backend build
+        uses: actions/download-artifact@v3
+        with:
+          name: backend-build
+          path: backend/dist
+
+      - name: Download frontend build
+        uses: actions/download-artifact@v3
+        with:
+          name: frontend-build
+          path: src/web/dist
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci --production
+
+      - name: Run database migrations
+        working-directory: backend
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tribe_test
+
+      - name: Seed test data
+        working-directory: backend
+        run: npm run db:seed
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tribe_test
+          NODE_ENV: test
+
+      - name: Start backend services
+        working-directory: backend
+        run: node dist/api-gateway/src/index.js & echo $! > api-gateway.pid
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tribe_test
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+          PORT: 3000
+          JWT_SECRET: test_jwt_secret
+          OPENROUTER_API_KEY: test_openrouter_key
+
+      - name: Wait for API to be ready
+        run: npx wait-on http://localhost:3000/health -t 30000
+
+      - name: Run E2E tests
+        working-directory: backend
+        run: npm run test:e2e
+        env:
+          API_URL: http://localhost:3000
+          NODE_ENV: test
+
+      - name: Stop backend services
+        if: always()
+        working-directory: backend
+        run: kill $(cat api-gateway.pid) || true
+
+  notify:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [build-frontend, build-backend, build-containers, e2e-tests, security-scan]
+    if: always() && github.ref == 'refs/heads/development'
+    steps:
+      - name: Check workflow status
+        id: check
+        run: echo "status=${{ job.status }}" >> $GITHUB_OUTPUT
+
+      - name: Send success notification
+        if: steps.check.outputs.status == 'success'
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_TITLE: 'CI Pipeline Succeeded'
+          SLACK_MESSAGE: 'All tests and builds completed successfully on development branch'
+          SLACK_COLOR: 'good'
+
+      - name: Send failure notification
+        if: steps.check.outputs.status != 'success'
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_TITLE: 'CI Pipeline Failed'
+          SLACK_MESSAGE: 'Some tests or builds failed on development branch'
+          SLACK_COLOR: 'danger'
