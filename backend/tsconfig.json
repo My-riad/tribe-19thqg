@@ -1,0 +1,51 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "lib": ["ES2020"],
+    "declaration": true,
+    "composite": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "sourceMap": true,
+    "removeComments": false,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["src/shared/src/*"]
+    }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts",
+    "tests"
+  ],
+  "references": [
+    { "path": "./src/shared" },
+    { "path": "./src/api-gateway" },
+    { "path": "./src/auth-service" },
+    { "path": "./src/profile-service" },
+    { "path": "./src/tribe-service" },
+    { "path": "./src/matching-service" },
+    { "path": "./src/event-service" },
+    { "path": "./src/engagement-service" },
+    { "path": "./src/planning-service" },
+    { "path": "./src/payment-service" },
+    { "path": "./src/notification-service" },
+    { "path": "./src/ai-orchestration-service" }
+  ]
+}
