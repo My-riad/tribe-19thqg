@@ -24,7 +24,7 @@
     "cors": "^2.8.5",
     "helmet": "^7.0.0",
     "compression": "^1.7.4",
-    "http-proxy-middleware": "^2.0.6",
+    "http-proxy-middleware": "^3.0.3",
     "express-rate-limit": "^6.7.0",
     "rate-limit-redis": "^3.0.0",
     "redis": "^4.6.7",
