@@ -1,0 +1,389 @@
+version: '3.8'
+
+services:
+  # Database service with PostGIS extension for geographic data
+  postgres:
+    image: postgis/postgis:15-3.3
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=tribe_dev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis for caching, session storage, and message queuing
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # API Gateway - entry point for client applications
+  api-gateway:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        SERVICE_DIR: api-gateway
+        SERVICE_PORT: '3000'
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - LOG_LEVEL=debug
+      - CORS_ORIGIN=*
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/tribe_dev
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./backend/src/api-gateway/src:/app/src
+      - ./backend/src/shared/src:/app/shared/src
+    restart: unless-stopped
+
+  # Authentication Service
+  auth-service:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        SERVICE_DIR: auth-service
+        SERVICE_PORT: '3001'
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - LOG_LEVEL=debug
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/tribe_dev
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev_jwt_secret_key
+      - JWT_EXPIRES_IN=15m
+      - JWT_REFRESH_EXPIRES_IN=7d
+      - MASTER_ENCRYPTION_KEY=dev_master_encryption_key
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./backend/src/auth-service/src:/app/src
+      - ./backend/src/shared/src:/app/shared/src
+    restart: unless-stopped
+
+  # Profile Service
+  profile-service:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        SERVICE_DIR: profile-service
+        SERVICE_PORT: '3002'
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_ENV=development
+      - PORT=3002
+      - LOG_LEVEL=debug
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/tribe_dev
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev_jwt_secret_key
+      - AI_ENGINE_URL=http://ai-engine:8000
+    depends_on:
+      - postgres
+      - redis
+      - auth-service
+      - ai-engine
+    volumes:
+      - ./backend/src/profile-service/src:/app/src
+      - ./backend/src/shared/src:/app/shared/src
+    restart: unless-stopped
+
+  # Tribe Service
+  tribe-service:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        SERVICE_DIR: tribe-service
+        SERVICE_PORT: '3003'
+    ports:
+      - "3003:3003"
+    environment:
+      - NODE_ENV=development
+      - PORT=3003
+      - LOG_LEVEL=debug
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/tribe_dev
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev_jwt_secret_key
+    depends_on:
+      - postgres
+      - redis
+      - auth-service
+      - profile-service
+    volumes:
+      - ./backend/src/tribe-service/src:/app/src
+      - ./backend/src/shared/src:/app/shared/src
+    restart: unless-stopped
+
+  # Matching Service
+  matching-service:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        SERVICE_DIR: matching-service
+        SERVICE_PORT: '3004'
+    ports:
+      - "3004:3004"
+    environment:
+      - NODE_ENV=development
+      - PORT=3004
+      - LOG_LEVEL=debug
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/tribe_dev
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev_jwt_secret_key
+      - AI_ENGINE_URL=http://ai-engine:8000
+      - MATCHING_BATCH_SIZE=100
+    depends_on:
+      - postgres
+      - redis
+      - profile-service
+      - tribe-service
+      - ai-engine
+    volumes:
+      - ./backend/src/matching-service/src:/app/src
+      - ./backend/src/shared/src:/app/shared/src
+    restart: unless-stopped
+
+  # Event Service
+  event-service:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        SERVICE_DIR: event-service
+        SERVICE_PORT: '3005'
+    ports:
+      - "3005:3005"
+    environment:
+      - NODE_ENV=development
+      - PORT=3005
+      - LOG_LEVEL=debug
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/tribe_dev
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev_jwt_secret_key
+      - AI_ENGINE_URL=http://ai-engine:8000
+      - EVENT_CACHE_TTL=900
+    depends_on:
+      - postgres
+      - redis
+      - tribe-service
+      - ai-engine
+    volumes:
+      - ./backend/src/event-service/src:/app/src
+      - ./backend/src/shared/src:/app/shared/src
+    restart: unless-stopped
+
+  # Engagement Service
+  engagement-service:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        SERVICE_DIR: engagement-service
+        SERVICE_PORT: '3006'
+    ports:
+      - "3006:3006"
+    environment:
+      - NODE_ENV=development
+      - PORT=3006
+      - LOG_LEVEL=debug
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/tribe_dev
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev_jwt_secret_key
+      - AI_ENGINE_URL=http://ai-engine:8000
+    depends_on:
+      - postgres
+      - redis
+      - tribe-service
+      - ai-engine
+    volumes:
+      - ./backend/src/engagement-service/src:/app/src
+      - ./backend/src/shared/src:/app/shared/src
+    restart: unless-stopped
+
+  # Planning Service
+  planning-service:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        SERVICE_DIR: planning-service
+        SERVICE_PORT: '3007'
+    ports:
+      - "3007:3007"
+    environment:
+      - NODE_ENV=development
+      - PORT=3007
+      - LOG_LEVEL=debug
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/tribe_dev
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev_jwt_secret_key
+      - AI_ENGINE_URL=http://ai-engine:8000
+    depends_on:
+      - postgres
+      - redis
+      - event-service
+      - ai-engine
+    volumes:
+      - ./backend/src/planning-service/src:/app/src
+      - ./backend/src/shared/src:/app/shared/src
+    restart: unless-stopped
+
+  # Payment Service
+  payment-service:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        SERVICE_DIR: payment-service
+        SERVICE_PORT: '3008'
+    ports:
+      - "3008:3008"
+    environment:
+      - NODE_ENV=development
+      - PORT=3008
+      - LOG_LEVEL=debug
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/tribe_dev
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev_jwt_secret_key
+      - STRIPE_API_KEY=sk_test_stripe_key
+    depends_on:
+      - postgres
+      - redis
+      - event-service
+    volumes:
+      - ./backend/src/payment-service/src:/app/src
+      - ./backend/src/shared/src:/app/shared/src
+    restart: unless-stopped
+
+  # Notification Service
+  notification-service:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        SERVICE_DIR: notification-service
+        SERVICE_PORT: '3009'
+    ports:
+      - "3009:3009"
+    environment:
+      - NODE_ENV=development
+      - PORT=3009
+      - LOG_LEVEL=debug
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/tribe_dev
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev_jwt_secret_key
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./backend/src/notification-service/src:/app/src
+      - ./backend/src/shared/src:/app/shared/src
+    restart: unless-stopped
+
+  # AI Orchestration Service
+  ai-orchestration-service:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        SERVICE_DIR: ai-orchestration-service
+        SERVICE_PORT: '3010'
+    ports:
+      - "3010:3010"
+    environment:
+      - NODE_ENV=development
+      - PORT=3010
+      - LOG_LEVEL=debug
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/tribe_dev
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev_jwt_secret_key
+      - AI_ENGINE_URL=http://ai-engine:8000
+      - OPENROUTER_API_URL=https://openrouter.ai/api/v1
+      - OPENROUTER_API_KEY=test_openrouter_key
+    depends_on:
+      - postgres
+      - redis
+      - ai-engine
+    volumes:
+      - ./backend/src/ai-orchestration-service/src:/app/src
+      - ./backend/src/shared/src:/app/shared/src
+    restart: unless-stopped
+
+  # AI Engine (Python service)
+  ai-engine:
+    build:
+      context: ./backend
+      dockerfile: src/ai-engine/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - ENV=development
+      - DEBUG=true
+      - LOG_LEVEL=debug
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DEFAULT_MODEL=gpt-3.5-turbo
+      - OPENROUTER_API_KEY=test_openrouter_key
+      - OPENROUTER_API_URL=https://openrouter.ai/api/v1
+      - AI_MODEL_TIMEOUT=10000
+      - AI_MAX_RETRIES=3
+      - AI_RETRY_DELAY=1000
+    volumes:
+      - ./backend/src/ai-engine/src:/app/src
+      - ./backend/src/ai-engine/tests:/app/tests
+    restart: unless-stopped
+
+  # Web Client (for admin and testing)
+  web-client:
+    build:
+      context: ./src/web
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=development
+      - REACT_APP_API_URL=http://localhost:3000
+      - REACT_APP_WS_URL=ws://localhost:3000
+    volumes:
+      - ./src/web:/app
+      - /app/node_modules
+    depends_on:
+      - api-gateway
+
+volumes:
+  postgres_data:
+    # Persistent volume for PostgreSQL data
+  redis_data:
+    # Persistent volume for Redis data
+
+networks:
+  tribe-network:
+    # Internal network for Tribe services
