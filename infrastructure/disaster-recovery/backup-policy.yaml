@@ -1,0 +1,403 @@
+# Backup Policy Configuration for Tribe Platform
+# This manifest defines the backup schedules, retention periods, and backup targets
+# to ensure comprehensive disaster recovery capabilities for the Tribe platform.
+
+# Namespace for Velero backup components
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: velero
+  labels:
+    name: velero
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+    tier: backup
+  annotations:
+    description: "Namespace for Velero backup components"
+
+---
+# Service account for Velero
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: velero
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/part-of: tribe
+
+---
+# Cluster role binding for Velero service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/part-of: tribe
+subjects:
+  - kind: ServiceAccount
+    name: velero
+    namespace: velero
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Secret containing AWS credentials for Velero
+apiVersion: v1
+kind: Secret
+metadata:
+  name: velero-credentials
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/part-of: tribe
+type: Opaque
+stringData:
+  cloud: |
+    aws:
+      region: ${AWS_REGION}
+      s3ForcePathStyle: true
+      s3Url: https://s3.${AWS_REGION}.amazonaws.com
+
+---
+# Default backup storage location in S3
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: default
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/part-of: tribe
+spec:
+  provider: aws
+  objectStorage:
+    bucket: ${BACKUP_BUCKET_NAME}
+    prefix: backups
+  config:
+    region: ${AWS_REGION}
+    s3ForcePathStyle: "true"
+    s3Url: https://s3.${AWS_REGION}.amazonaws.com
+  accessMode: ReadWrite
+
+---
+# Default volume snapshot location in AWS
+apiVersion: velero.io/v1
+kind: VolumeSnapshotLocation
+metadata:
+  name: aws-default
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/part-of: tribe
+spec:
+  provider: aws
+  config:
+    region: ${AWS_REGION}
+
+---
+# Daily full backup schedule for all namespaces
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: daily-full-backup
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/part-of: tribe
+spec:
+  schedule: "0 1 * * *"  # Run at 1:00 AM daily
+  template:
+    includedNamespaces:
+      - "*"
+    excludedNamespaces:
+      - kube-system
+      - velero
+    includedResources:
+      - "*"
+    excludedResources:
+      - events
+      - events.events.k8s.io
+      - nodes
+      - endpoints
+    includeClusterResources: true
+    labelSelector:
+      matchExpressions:
+        - key: backup
+          operator: NotIn
+          values:
+            - exclude
+    snapshotVolumes: true
+    storageLocation: default
+    volumeSnapshotLocations:
+      - aws-default
+    ttl: "720h"  # 30 days retention
+
+---
+# Hourly backup schedule for API services namespace
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: hourly-api-services-backup
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/part-of: tribe
+spec:
+  schedule: "0 * * * *"  # Run at the top of every hour
+  template:
+    includedNamespaces:
+      - api-services
+    excludedNamespaces: []
+    includedResources:
+      - "*"
+    excludedResources:
+      - events
+      - events.events.k8s.io
+    includeClusterResources: false
+    snapshotVolumes: true
+    storageLocation: default
+    volumeSnapshotLocations:
+      - aws-default
+    ttl: "168h"  # 7 days retention
+
+---
+# Hourly backup schedule for AI services namespace
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: hourly-ai-services-backup
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/part-of: tribe
+spec:
+  schedule: "30 * * * *"  # Run at 30 minutes past every hour
+  template:
+    includedNamespaces:
+      - ai-services
+    excludedNamespaces: []
+    includedResources:
+      - "*"
+    excludedResources:
+      - events
+      - events.events.k8s.io
+    includeClusterResources: false
+    snapshotVolumes: true
+    storageLocation: default
+    volumeSnapshotLocations:
+      - aws-default
+    ttl: "168h"  # 7 days retention
+
+---
+# Weekly full backup schedule with longer retention
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: weekly-full-backup
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/part-of: tribe
+spec:
+  schedule: "0 0 * * 0"  # Run at midnight on Sunday
+  template:
+    includedNamespaces:
+      - "*"
+    excludedNamespaces:
+      - kube-system
+      - velero
+    includedResources:
+      - "*"
+    excludedResources:
+      - events
+      - events.events.k8s.io
+      - nodes
+      - endpoints
+    includeClusterResources: true
+    snapshotVolumes: true
+    storageLocation: default
+    volumeSnapshotLocations:
+      - aws-default
+    ttl: "2160h"  # 90 days retention
+
+---
+# Configuration for backup verification jobs
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-verification-config
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/part-of: tribe
+data:
+  verification-schedule: "0 3 * * 1"  # Run at 3:00 AM every Monday
+  verification-script: |
+    #!/bin/bash
+
+    # Get the latest backup
+    LATEST_BACKUP=$(velero backup get | grep -v NAME | sort -k3 -r | head -n1 | awk '{print $1}')
+
+    if [ -z "$LATEST_BACKUP" ]; then
+      echo "No backups found to verify"
+      exit 1
+    fi
+
+    echo "Verifying backup: $LATEST_BACKUP"
+
+    # Create a restore in a test namespace
+    TEST_NS="backup-verification-$(date +%s)"
+    kubectl create namespace $TEST_NS
+
+    velero restore create --from-backup $LATEST_BACKUP \
+      --namespace-mappings api-services:$TEST_NS \
+      --include-namespaces api-services \
+      --include-resources deployments,configmaps,secrets \
+      --restore-volumes=false \
+      --wait
+
+    # Check if restore succeeded
+    RESTORE_STATUS=$(velero restore get | grep $LATEST_BACKUP | awk '{print $3}')
+
+    if [ "$RESTORE_STATUS" == "Completed" ]; then
+      echo "Backup verification successful"
+      kubectl delete namespace $TEST_NS
+      exit 0
+    else
+      echo "Backup verification failed"
+      kubectl delete namespace $TEST_NS
+      exit 1
+    fi
+
+---
+# CronJob to verify backup integrity
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-verification
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/part-of: tribe
+spec:
+  schedule: "0 3 * * 1"  # Run at 3:00 AM every Monday
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: backup-verification
+            app.kubernetes.io/part-of: tribe
+        spec:
+          serviceAccountName: velero
+          restartPolicy: OnFailure
+          containers:
+            - name: backup-verification
+              image: velero/velero:v1.9.0
+              command:
+                - /bin/sh
+                - -c
+                - cp /scripts/verification-script /tmp/verify.sh && chmod +x /tmp/verify.sh && /tmp/verify.sh
+              volumeMounts:
+                - name: verification-config
+                  mountPath: /scripts
+          volumes:
+            - name: verification-config
+              configMap:
+                name: backup-verification-config
+                items:
+                  - key: verification-script
+                    path: verification-script
+
+---
+# Configuration for S3 cross-region replication
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: s3-sync-config
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/part-of: tribe
+data:
+  sync-script: |
+    #!/bin/bash
+
+    # Sync backups to DR region
+    aws s3 sync s3://${BACKUP_BUCKET_NAME}/backups s3://${DR_BACKUP_BUCKET_NAME}/backups --region ${AWS_REGION}
+
+    # Verify sync was successful
+    SOURCE_COUNT=$(aws s3 ls s3://${BACKUP_BUCKET_NAME}/backups --recursive --summarize | grep "Total Objects" | awk '{print $3}')
+    DEST_COUNT=$(aws s3 ls s3://${DR_BACKUP_BUCKET_NAME}/backups --recursive --summarize | grep "Total Objects" | awk '{print $3}')
+
+    if [ "$SOURCE_COUNT" == "$DEST_COUNT" ]; then
+      echo "Sync successful: $SOURCE_COUNT objects synchronized"
+      exit 0
+    else
+      echo "Sync verification failed: Source has $SOURCE_COUNT objects, destination has $DEST_COUNT objects"
+      exit 1
+    fi
+
+---
+# CronJob to sync backups to DR region
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: s3-cross-region-sync
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/part-of: tribe
+spec:
+  schedule: "0 2 * * *"  # Run at 2:00 AM daily
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: s3-cross-region-sync
+            app.kubernetes.io/part-of: tribe
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: s3-sync
+              image: amazon/aws-cli:2.9.19
+              command:
+                - /bin/sh
+                - -c
+                - cp /scripts/sync-script /tmp/sync.sh && chmod +x /tmp/sync.sh && /tmp/sync.sh
+              env:
+                - name: BACKUP_BUCKET_NAME
+                  value: ${BACKUP_BUCKET_NAME}
+                - name: DR_BACKUP_BUCKET_NAME
+                  value: ${DR_BACKUP_BUCKET_NAME}
+                - name: AWS_REGION
+                  value: ${AWS_REGION}
+                - name: DR_REGION
+                  value: ${DR_REGION}
+              volumeMounts:
+                - name: sync-config
+                  mountPath: /scripts
+                - name: aws-credentials
+                  mountPath: /root/.aws
+                  readOnly: true
+          volumes:
+            - name: sync-config
+              configMap:
+                name: s3-sync-config
+                items:
+                  - key: sync-script
+                    path: sync-script
+            - name: aws-credentials
+              secret:
+                secretName: aws-credentials
