@@ -1,0 +1,172 @@
+# Kubernetes Namespaces for the Tribe platform
+# This file defines the logical partitioning of microservices within the Kubernetes cluster
+# Provides isolation for different service categories to enable proper resource allocation,
+# access control, and operational boundaries.
+
+---
+# API Services Namespace - Backend Services
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: api-services
+  labels:
+    name: api-services
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+    tier: backend
+  annotations:
+    description: "Core API services for the Tribe platform"
+
+---
+# Frontend Services Namespace - User-facing Services
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: frontend-services
+  labels:
+    name: frontend-services
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+    tier: frontend
+  annotations:
+    description: "Frontend services for the Tribe platform"
+
+---
+# AI Services Namespace - Machine Learning and AI Processing
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-services
+  labels:
+    name: ai-services
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+    tier: data-processing
+  annotations:
+    description: "AI and machine learning services for the Tribe platform"
+
+---
+# Monitoring Namespace - Observability Tools
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    name: monitoring
+    part-of: tribe
+    environment: ${ENVIRONMENT}
+    tier: observability
+  annotations:
+    description: "Monitoring and observability services for the Tribe platform"
+
+---
+# Resource Quotas for each namespace
+# These limit the total resources that can be used within each namespace
+
+# API Services Quota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: api-services-quota
+  namespace: api-services
+spec:
+  hard:
+    pods: "50"
+    requests.cpu: "16"
+    requests.memory: "32Gi"
+    limits.cpu: "32"
+    limits.memory: "64Gi"
+
+---
+# Frontend Services Quota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: frontend-services-quota
+  namespace: frontend-services
+spec:
+  hard:
+    pods: "20"
+    requests.cpu: "4"
+    requests.memory: "8Gi"
+    limits.cpu: "8"
+    limits.memory: "16Gi"
+
+---
+# AI Services Quota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ai-services-quota
+  namespace: ai-services
+spec:
+  hard:
+    pods: "20"
+    requests.cpu: "8"
+    requests.memory: "16Gi"
+    limits.cpu: "16"
+    limits.memory: "32Gi"
+
+---
+# Monitoring Quota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: monitoring-quota
+  namespace: monitoring
+spec:
+  hard:
+    pods: "15"
+    requests.cpu: "4"
+    requests.memory: "8Gi"
+    limits.cpu: "8"
+    limits.memory: "16Gi"
+
+---
+# Default resource limits for containers
+# Ensures containers have appropriate resource constraints by default
+
+# API Services Default Limits
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: api-services-limits
+  namespace: api-services
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "500m"
+      memory: "512Mi"
+    defaultRequest:
+      cpu: "250m"
+      memory: "256Mi"
+    max:
+      cpu: "2"
+      memory: "2Gi"
+    min:
+      cpu: "100m"
+      memory: "128Mi"
+
+---
+# AI Services Default Limits
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: ai-services-limits
+  namespace: ai-services
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "1"
+      memory: "1Gi"
+    defaultRequest:
+      cpu: "500m"
+      memory: "512Mi"
+    max:
+      cpu: "4"
+      memory: "8Gi"
+    min:
+      cpu: "250m"
+      memory: "256Mi"
