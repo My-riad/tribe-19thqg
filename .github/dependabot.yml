@@ -1,0 +1,220 @@
+# Dependabot configuration for the Tribe platform
+# This file configures automated dependency updates across multiple ecosystems
+
+version: 2
+updates:
+  # Frontend React Native application dependencies
+  - package-ecosystem: "npm"
+    directory: "/src/web"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "frontend-team"
+    labels:
+      - "dependencies"
+      - "frontend"
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+      include: "scope"
+    groups:
+      react-packages:
+        patterns:
+          - "react*"
+          - "@react*"
+        exclude-patterns:
+          - "react-native-*"
+      expo-packages:
+        patterns:
+          - "expo*"
+          - "@expo*"
+      testing-packages:
+        patterns:
+          - "jest*"
+          - "@testing-library/*"
+          - "@types/jest"
+    ignore:
+      - dependency-name: "react-native"
+        versions: [">=0.73.0"]
+    versioning-strategy: "auto"
+
+  # Backend root dependencies
+  - package-ecosystem: "npm"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "backend-team"
+    labels:
+      - "dependencies"
+      - "backend"
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+      include: "scope"
+    groups:
+      prisma-packages:
+        patterns:
+          - "prisma"
+          - "@prisma/*"
+      typescript-packages:
+        patterns:
+          - "typescript"
+          - "@types/*"
+          - "@typescript-eslint/*"
+      testing-packages:
+        patterns:
+          - "jest*"
+          - "supertest"
+          - "@types/jest"
+          - "@types/supertest"
+    versioning-strategy: "auto"
+
+  # Shared library dependencies
+  - package-ecosystem: "npm"
+    directory: "/backend/src/shared"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "backend-team"
+    labels:
+      - "dependencies"
+      - "backend"
+      - "shared"
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+      include: "scope"
+    versioning-strategy: "auto"
+
+  # Authentication service dependencies
+  - package-ecosystem: "npm"
+    directory: "/backend/src/auth-service"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "backend-team"
+    labels:
+      - "dependencies"
+      - "backend"
+      - "auth-service"
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+      include: "scope"
+    versioning-strategy: "auto"
+
+  # AI Engine Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/backend/src/ai-engine"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "ai-team"
+    labels:
+      - "dependencies"
+      - "backend"
+      - "ai-engine"
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+      include: "scope"
+
+  # Backend Docker images
+  - package-ecosystem: "docker"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "devops-team"
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+      include: "scope"
+
+  # AI Engine Docker images
+  - package-ecosystem: "docker"
+    directory: "/backend/src/ai-engine"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "devops-team"
+      - "ai-team"
+    labels:
+      - "dependencies" 
+      - "docker"
+      - "ai-engine"
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+      include: "scope"
+
+  # GitHub Actions workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "devops-team"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+      prefix-development: "ci"
+      include: "scope"
+
+  # Terraform infrastructure
+  - package-ecosystem: "terraform"
+    directory: "/infrastructure/terraform"
+    schedule:
+      interval: "monthly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "devops-team"
+    labels:
+      - "dependencies"
+      - "infrastructure"
+      - "terraform"
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+      include: "scope"
