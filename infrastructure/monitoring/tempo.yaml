@@ -1,0 +1,380 @@
+---
+# ServiceAccount for Tempo to access Kubernetes resources
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tempo
+  namespace: monitoring
+  labels:
+    app: tempo
+    part-of: tribe
+    tier: observability
+
+---
+# ConfigMap containing Tempo configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tempo-config
+  namespace: monitoring
+  labels:
+    app: tempo
+    part-of: tribe
+    tier: observability
+data:
+  tempo.yaml: |
+    server:
+      http_listen_port: 3200
+      grpc_listen_port: 9096
+
+    distributor:
+      receivers:
+        jaeger:
+          protocols:
+            thrift_http:
+              endpoint: 0.0.0.0:14268
+            grpc:
+              endpoint: 0.0.0.0:14250
+            thrift_binary:
+              endpoint: 0.0.0.0:6832
+            thrift_compact:
+              endpoint: 0.0.0.0:6831
+        zipkin:
+          endpoint: 0.0.0.0:9411
+        otlp:
+          protocols:
+            http:
+              endpoint: 0.0.0.0:4318
+            grpc:
+              endpoint: 0.0.0.0:4317
+        opencensus:
+          endpoint: 0.0.0.0:55678
+
+    compactor:
+      compaction:
+        block_retention: 48h
+
+    storage:
+      trace:
+        backend: local
+        block:
+          bloom_filter_false_positive: .05
+          index_downsample_bytes: 1000
+          encoding: zstd
+        wal:
+          path: /var/tempo/wal
+        local:
+          path: /var/tempo/blocks
+
+    querier:
+      frontend_worker:
+        frontend_address: tempo-query:9095
+
+    overrides:
+      metrics_generator:
+        processors: [service-graphs, span-metrics]
+
+    usage_report:
+      reporting_enabled: false
+
+    tracing:
+      enabled: true
+      endpoint: tempo:4317
+      insecure: true
+
+    metrics_generator:
+      registry:
+        external_labels:
+          source: tempo
+          cluster: tribe
+      storage:
+        path: /var/tempo/generator/wal
+        remote_write:
+          - url: http://prometheus:9090/api/v1/write
+            send_exemplars: true
+      processors:
+        - service-graphs:
+            max_items: 10000
+            wait: 10s
+        - span-metrics:
+            dimensions:
+              - name: service
+              - name: span_name
+              - name: status_code
+            histogram_buckets: [0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+
+---
+# PersistentVolumeClaim for Tempo data storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tempo-storage
+  namespace: monitoring
+  labels:
+    app: tempo
+    part-of: tribe
+    tier: observability
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: gp2
+
+---
+# Deployment for Tempo distributed tracing backend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempo
+  namespace: monitoring
+  labels:
+    app: tempo
+    part-of: tribe
+    tier: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tempo
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: tempo
+        part-of: tribe
+        tier: observability
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3200"
+    spec:
+      serviceAccountName: tempo
+      securityContext:
+        fsGroup: 10001
+        runAsGroup: 10001
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: tempo
+          image: grafana/tempo:2.1.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config.file=/etc/tempo/tempo.yaml
+            - -mem-ballast-size-mbs=1024
+          ports:
+            - name: http
+              containerPort: 3200
+              protocol: TCP
+            - name: grpc
+              containerPort: 9096
+              protocol: TCP
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+            - name: jaeger-grpc
+              containerPort: 14250
+              protocol: TCP
+            - name: jaeger-http
+              containerPort: 14268
+              protocol: TCP
+            - name: jaeger-comp
+              containerPort: 6831
+              protocol: UDP
+            - name: jaeger-bin
+              containerPort: 6832
+              protocol: UDP
+            - name: zipkin
+              containerPort: 9411
+              protocol: TCP
+            - name: opencensus
+              containerPort: 55678
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3200
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 3200
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 1
+              memory: 2Gi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/tempo/tempo.yaml
+              subPath: tempo.yaml
+            - name: storage
+              mountPath: /var/tempo
+      volumes:
+        - name: config
+          configMap:
+            name: tempo-config
+        - name: storage
+          persistentVolumeClaim:
+            claimName: tempo-storage
+
+---
+# Service to expose Tempo within the cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  namespace: monitoring
+  labels:
+    app: tempo
+    part-of: tribe
+    tier: observability
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "3200"
+spec:
+  selector:
+    app: tempo
+  ports:
+    - name: http
+      port: 3200
+      targetPort: 3200
+      protocol: TCP
+    - name: grpc
+      port: 9096
+      targetPort: 9096
+      protocol: TCP
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+    - name: jaeger-grpc
+      port: 14250
+      targetPort: 14250
+      protocol: TCP
+    - name: jaeger-http
+      port: 14268
+      targetPort: 14268
+      protocol: TCP
+    - name: jaeger-comp
+      port: 6831
+      targetPort: 6831
+      protocol: UDP
+    - name: jaeger-bin
+      port: 6832
+      targetPort: 6832
+      protocol: UDP
+    - name: zipkin
+      port: 9411
+      targetPort: 9411
+      protocol: TCP
+    - name: opencensus
+      port: 55678
+      targetPort: 55678
+      protocol: TCP
+
+---
+# Deployment for Tempo Query frontend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempo-query
+  namespace: monitoring
+  labels:
+    app: tempo-query
+    part-of: tribe
+    tier: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tempo-query
+  template:
+    metadata:
+      labels:
+        app: tempo-query
+        part-of: tribe
+        tier: observability
+    spec:
+      serviceAccountName: tempo
+      containers:
+        - name: tempo-query
+          image: grafana/tempo-query:2.1.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - --query.base-path=/
+            - --grpc-storage-plugin.configuration-file=/etc/tempo-query/tempo-query.yaml
+          ports:
+            - name: http
+              containerPort: 16686
+              protocol: TCP
+            - name: grpc
+              containerPort: 9095
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          volumeMounts:
+            - name: tempo-query-config
+              mountPath: /etc/tempo-query
+      volumes:
+        - name: tempo-query-config
+          configMap:
+            name: tempo-query-config
+
+---
+# ConfigMap containing Tempo Query configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tempo-query-config
+  namespace: monitoring
+  labels:
+    app: tempo-query
+    part-of: tribe
+    tier: observability
+data:
+  tempo-query.yaml: |
+    backend: 127.0.0.1:9095
+    backend_type: GRPC
+
+---
+# Service to expose Tempo Query within the cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo-query
+  namespace: monitoring
+  labels:
+    app: tempo-query
+    part-of: tribe
+    tier: observability
+spec:
+  selector:
+    app: tempo-query
+  ports:
+    - name: http
+      port: 16686
+      targetPort: 16686
+      protocol: TCP
+    - name: grpc
+      port: 9095
+      targetPort: 9095
+      protocol: TCP
