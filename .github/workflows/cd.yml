@@ -172,7 +172,7 @@ jobs:
         run: npx expo export --platform ios --env ${{ needs.determine-environment.outputs.environment }}
       
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: mobile-app-build
           path: src/web/dist
