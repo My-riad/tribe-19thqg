@@ -1,0 +1,194 @@
+# Kubernetes Ingress Configuration for Tribe Platform
+# This file defines the external access points for the Tribe platform's services
+# It configures routing rules, TLS termination, and load balancing
+---
+# API Gateway Ingress
+# Routes external traffic to the API gateway service
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-ingress
+  namespace: api-services
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+  - hosts:
+    - api.${DOMAIN_NAME}
+    secretName: api-tls-cert
+  rules:
+  - host: api.${DOMAIN_NAME}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: api-gateway
+            port:
+              number: 80
+---
+# Web Frontend Ingress
+# Routes traffic to the web frontend service
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web-ingress
+  namespace: frontend-services
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+  - hosts:
+    - ${DOMAIN_NAME}
+    - www.${DOMAIN_NAME}
+    secretName: web-tls-cert
+  rules:
+  - host: ${DOMAIN_NAME}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: web-frontend
+            port:
+              number: 80
+  - host: www.${DOMAIN_NAME}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: web-frontend
+            port:
+              number: 80
+---
+# Monitoring Ingress
+# Routes traffic to Grafana with basic auth protection
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: monitoring-ingress
+  namespace: monitoring
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/auth-type: "basic"
+    nginx.ingress.kubernetes.io/auth-secret: "monitoring-basic-auth"
+    nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+  - hosts:
+    - monitoring.${DOMAIN_NAME}
+    secretName: monitoring-tls-cert
+  rules:
+  - host: monitoring.${DOMAIN_NAME}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: grafana
+            port:
+              number: 80
+---
+# API Certificate
+# TLS certificate for the API domain
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: api-certificate
+  namespace: api-services
+spec:
+  secretName: api-tls-cert
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - api.${DOMAIN_NAME}
+  duration: 2160h  # 90 days
+  renewBefore: 360h  # 15 days
+---
+# Web Certificate
+# TLS certificate for the web domain and www subdomain
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: web-certificate
+  namespace: frontend-services
+spec:
+  secretName: web-tls-cert
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - ${DOMAIN_NAME}
+  - www.${DOMAIN_NAME}
+  duration: 2160h  # 90 days
+  renewBefore: 360h  # 15 days
+---
+# Monitoring Certificate
+# TLS certificate for the monitoring domain
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: monitoring-certificate
+  namespace: monitoring
+spec:
+  secretName: monitoring-tls-cert
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - monitoring.${DOMAIN_NAME}
+  duration: 2160h  # 90 days
+  renewBefore: 360h  # 15 days
+---
+# Let's Encrypt Production Issuer
+# Issues production TLS certificates from Let's Encrypt
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@${DOMAIN_NAME}
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+    - http01:
+        ingress:
+          class: nginx
+---
+# Basic Auth Secret for Monitoring
+# Contains encoded credentials for accessing monitoring dashboards
+apiVersion: v1
+kind: Secret
+metadata:
+  name: monitoring-basic-auth
+  namespace: monitoring
+type: Opaque
+data:
+  # Base64 encoded htpasswd format: "username:password"
+  auth: ${BASE64_MONITORING_AUTH}
