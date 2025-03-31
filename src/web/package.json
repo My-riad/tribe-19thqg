@@ -62,7 +62,7 @@
     "jwt-decode": "^3.1.2",
     "lodash.debounce": "^4.0.8",
     "lottie-react-native": "^5.1.6",
-    "mixpanel-react-native": "^2.3.1",
+    "mixpanel-react-native": "^3.0.8",
     "react": "^18.2.0",
     "react-native": "0.72.3",
     "react-native-calendars": "^1.1299.0",
