@@ -27,7 +27,7 @@
   "author": "Tribe Team",
   "license": "UNLICENSED",
   "dependencies": {
-    "@prisma/client": "^4.16.0",
+    "@prisma/client": "^6.5.0",
     "axios": "^1.4.0",
     "axios-retry": "^3.5.0",
     "bcrypt": "^5.1.0",
