@@ -1,5 +1,5 @@
 # Build stage
-FROM python:3.10-slim AS build
+FROM python:3.13-slim AS build
 
 WORKDIR /app
 
@@ -26,7 +26,7 @@ RUN groupadd -r aiengine && useradd -r -g aiengine aiengine
 RUN chown -R aiengine:aiengine /app
 
 # Production stage
-FROM python:3.10-slim AS production
+FROM python:3.13-slim AS production
 
 WORKDIR /app
 
