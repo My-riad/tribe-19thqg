@@ -124,7 +124,7 @@ jobs:
         run: npx istanbul check-coverage --statements ${{ env.COVERAGE_THRESHOLD_FRONTEND }} --branches ${{ env.COVERAGE_THRESHOLD_FRONTEND }} --functions ${{ env.COVERAGE_THRESHOLD_FRONTEND }} --lines ${{ env.COVERAGE_THRESHOLD_FRONTEND }}
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: frontend-coverage
           path: src/web/coverage
@@ -215,7 +215,7 @@ jobs:
         run: npx istanbul check-coverage --statements ${{ env.COVERAGE_THRESHOLD_BACKEND }} --branches ${{ env.COVERAGE_THRESHOLD_BACKEND }} --functions ${{ env.COVERAGE_THRESHOLD_BACKEND }} --lines ${{ env.COVERAGE_THRESHOLD_BACKEND }}
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: backend-coverage
           path: backend/coverage
